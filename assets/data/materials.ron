@@ -1,0 +1,40 @@
+// 像素材质定义表 —— 可运行时修改并热加载（材质向导的底层数据）
+// kind: Powder 粉末 | Liquid 液体 | Gas 气体 | Static 静态地形
+// special: Fire 火 | Lava 岩浆 | Acid 酸（触发特殊反应）
+// Static 专属: solid 实心 | platform 单向平台 | climbable 可攀爬
+//              hp 挖掘硬度(每像素) | light 自发光 | acid_proof 免疫酸 | drop 破坏掉落物
+(
+    materials: [
+        // ---- 动态材质 ----
+        (name: "sand",    kind: Powder, color: (218, 165, 94),  jitter: 36, density: 1600),
+        (name: "water",   kind: Liquid, color: (52, 118, 198),  jitter: 26, density: 1000, dispersal: 6),
+        (name: "oil",     kind: Liquid, color: (86, 62, 40),    jitter: 18, density: 800,  dispersal: 5, flammable: 210, burn_life: 110),
+        (name: "lava",    kind: Liquid, color: (236, 92, 22),   jitter: 34, density: 2600, dispersal: 2, emissive: 220, special: Some(Lava)),
+        (name: "acid",    kind: Liquid, color: (140, 224, 44),  jitter: 28, density: 1100, dispersal: 6, special: Some(Acid)),
+        (name: "fire",    kind: Gas,    color: (255, 140, 30),  jitter: 70, life: 36, emissive: 240, special: Some(Fire)),
+        (name: "smoke",   kind: Gas,    color: (62, 62, 68),    jitter: 22, life: 110),
+        (name: "steam",   kind: Gas,    color: (198, 208, 220), jitter: 26, life: 130),
+        (name: "stone_debris", kind: Powder, color: (120, 120, 126), jitter: 28, density: 1800),
+        (name: "dirt_debris",  kind: Powder, color: (128, 90, 56),  jitter: 28, density: 1500),
+        (name: "ash",     kind: Powder, color: (88, 84, 80),    jitter: 18, density: 1200),
+        (name: "wood_debris", kind: Powder, color: (150, 108, 58), jitter: 24, density: 1300, flammable: 230, burn_life: 80),
+        (name: "snow",    kind: Powder, color: (232, 238, 246), jitter: 14, density: 600),
+        (name: "berry",   kind: Static, color: (208, 62, 62),   jitter: 20, hp: 1,  drop: Some("wood_debris")),
+
+        // ---- 静态地形（1 像素粒度，Noita 式）----
+        (name: "dirt",     kind: Static, solid: true,  color: (121, 85, 58),   jitter: 26, hp: 3,  drop: Some("dirt_debris")),
+        (name: "grass",    kind: Static, solid: true,  color: (96, 152, 62),   jitter: 22, hp: 3,  drop: Some("dirt_debris")),
+        (name: "stone",    kind: Static, solid: true,  color: (122, 122, 128), jitter: 22, hp: 8,  drop: Some("stone_debris")),
+        (name: "wood",     kind: Static, solid: true,  color: (150, 108, 58),  jitter: 20, hp: 5,  flammable: 200, drop: Some("wood_debris")),
+        (name: "leaf",     kind: Static, solid: false, color: (70, 130, 52),   jitter: 26, hp: 1,  flammable: 230),
+        (name: "sandstone", kind: Static, solid: true, color: (206, 164, 98),  jitter: 20, hp: 3,  drop: Some("sand")),
+        (name: "snowpack", kind: Static, solid: true,  color: (226, 232, 240), jitter: 12, hp: 2,  drop: Some("snow")),
+        (name: "bedrock",  kind: Static, solid: true,  color: (40, 40, 44),    jitter: 8,  hp: 0, acid_proof: true),
+        (name: "coal_ore", kind: Static, solid: true,  color: (74, 74, 78),    jitter: 16, hp: 10, acid_proof: true, drop: Some("stone_debris")),
+        (name: "iron_ore", kind: Static, solid: true,  color: (128, 106, 92),  jitter: 16, hp: 12, acid_proof: true, drop: Some("stone_debris")),
+        (name: "gold_ore", kind: Static, solid: true,  color: (150, 124, 52),  jitter: 16, hp: 14, acid_proof: true, drop: Some("stone_debris")),
+        (name: "platform", kind: Static, solid: false, platform: true, color: (160, 120, 70), jitter: 16, hp: 4, drop: Some("wood_debris")),
+        (name: "rope",     kind: Static, solid: false, climbable: true, color: (150, 110, 60), jitter: 14, hp: 2, drop: Some("wood_debris")),
+        (name: "torch",    kind: Static, solid: false, light: 224, hp: 1, color: (255, 190, 80), jitter: 0, drop: Some("wood_debris")),
+    ],
+)

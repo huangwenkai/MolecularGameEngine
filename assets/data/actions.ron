@@ -1,0 +1,21 @@
+// 动作定义表（数据驱动）—— 剑三连击
+// 帧数单位 = 逻辑帧(1/60s)；角度单位 = 度（面朝右时，正=向下挥）
+(
+    actions: [
+        (name: "sword1", windup: 5, active: 6, recovery: 10,
+         hit_offset: (17.0, 2.0), hit_size: (26.0, 20.0),
+         damage: 10.0, knockback: (80.0, -40.0),
+         next: Some("sword2"), cancel_from: 4,
+         swing_from: -80.0, swing_to: 70.0),
+        (name: "sword2", windup: 4, active: 6, recovery: 10,
+         hit_offset: (17.0, 2.0), hit_size: (26.0, 20.0),
+         damage: 10.0, knockback: (80.0, -40.0),
+         next: Some("sword3"), cancel_from: 4,
+         swing_from: 70.0, swing_to: -80.0),
+        (name: "sword3", windup: 8, active: 8, recovery: 16,
+         hit_offset: (19.0, 0.0), hit_size: (34.0, 24.0),
+         damage: 22.0, knockback: (170.0, -80.0),
+         next: None, cancel_from: 99,
+         swing_from: -110.0, swing_to: 110.0),
+    ],
+)

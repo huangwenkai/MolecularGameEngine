@@ -1,0 +1,56 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/mge-core",
+    "crates/mge-platform",
+    "crates/mge-render",
+    "crates/mge-sim",
+    "crates/mge-world",
+    "crates/mge-runtime",
+    "game",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+
+[workspace.dependencies]
+# 图形
+wgpu = "24"
+winit = "0.30"
+glam = "0.29"
+bytemuck = { version = "1", features = ["derive"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
+pollster = "0.4"
+# ECS / 数据
+hecs = "0.10"
+serde = { version = "1", features = ["derive"] }
+ron = "0.8"
+# 系统
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+noise = "0.9"
+rayon = "1"
+notify = "6"
+# UI（特效编辑器）
+egui = "0.32"
+egui-winit = { version = "0.32", default-features = false, features = ["clipboard"] }
+# 音频
+kira = "0.12"
+# 内部
+mge-core = { path = "crates/mge-core" }
+mge-platform = { path = "crates/mge-platform" }
+mge-render = { path = "crates/mge-render" }
+mge-sim = { path = "crates/mge-sim" }
+mge-world = { path = "crates/mge-world" }
+mge-runtime = { path = "crates/mge-runtime" }
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+opt-level = 3
+lto = "thin"

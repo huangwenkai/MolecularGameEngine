@@ -1,0 +1,10 @@
+(
+    slash: "sword_slash",
+    hit: "hit_spark",
+    crit: "crit_spark",
+    arrow_hit: "arrow_hit",
+    hit_spark: "hit_spark",
+    explosion: "explosion",
+    fizz: "fire_fizz",
+    death: "dummy_death",
+)

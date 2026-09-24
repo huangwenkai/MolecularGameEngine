@@ -1,0 +1,72 @@
+// 物品数据库：定义 / 词缀池 / 掉落表 / 合成配方（数据驱动）
+// 注意：RON 定长数组/元组用圆括号；字符串正常。
+(
+    items: [
+        // ---- 武器 ----
+        (id: "sword_rusty",  name: "锈剑",   slot: Weapon, dmg: 8.0,  speed: 1.0,  lvl: 1, value: 5),
+        (id: "sword_iron",   name: "铁剑",   slot: Weapon, dmg: 15.0, speed: 1.0,  lvl: 2, value: 30),
+        (id: "sword_knight", name: "骑士剑", slot: Weapon, dmg: 24.0, speed: 1.05, lvl: 4, value: 120),
+        (id: "axe_battle",   name: "战斧",   slot: Weapon, dmg: 34.0, speed: 0.75, lvl: 5, value: 180),
+        // ---- 护甲 ----
+        (id: "helm_cloth",  name: "布帽",  slot: Head,  armor: 1.0, lvl: 1, value: 4),
+        (id: "helm_iron",   name: "铁盔",  slot: Head,  armor: 4.0, lvl: 3, value: 60),
+        (id: "chest_cloth", name: "布衣",  slot: Chest, armor: 2.0, hp: 5.0,  lvl: 1, value: 6),
+        (id: "chest_iron",  name: "铁甲",  slot: Chest, armor: 6.0, hp: 15.0, lvl: 3, value: 90),
+        (id: "legs_cloth",  name: "布裤",  slot: Legs,  armor: 1.0, lvl: 1, value: 4),
+        (id: "legs_iron",   name: "铁腿甲", slot: Legs, armor: 4.0, lvl: 3, value: 60),
+        // ---- 饰品 ----
+        (id: "amulet_hp",    name: "生命护符", slot: Trinket, hp: 15.0, lvl: 2, value: 50),
+        (id: "ring_swift",   name: "疾风戒指", slot: Trinket, speed: 1.08, lvl: 2, value: 50),
+        // ---- 消耗品 / 材料 ----
+        (id: "potion_hp", name: "治疗药水", slot: Trinket, stack: 99, hp: 40.0, value: 15),
+        (id: "cloth",     name: "布料",     slot: Trinket, stack: 99, value: 2),
+        (id: "gel",       name: "凝胶",     slot: Trinket, stack: 99, value: 3),
+        (id: "coin",      name: "金币",     slot: Trinket, stack: 65000, value: 1),
+    ],
+
+    // 词缀池（prefix 前缀 / 后缀；数值 = min+rand*(max-min) + per_lvl*(ilvl-1)）
+    affixes: [
+        (id: "sharp",  name: "锋利", stat: DmgFlat,  min: 2.0,  max: 6.0,  per_lvl: 0.8, prefix: true),
+        (id: "heavy",  name: "沉重", stat: DmgPct,   min: 6.0,  max: 12.0, per_lvl: 0.6, prefix: true),
+        (id: "swift",  name: "迅捷", stat: AtkPct,   min: 4.0,  max: 10.0, per_lvl: 0.4, prefix: true),
+        (id: "keen",   name: "精准", stat: Crit,     min: 2.0,  max: 6.0,  per_lvl: 0.2, prefix: true),
+        (id: "sturdy", name: "坚固", stat: Armor,    min: 1.0,  max: 4.0,  per_lvl: 0.5, prefix: false),
+        (id: "vital",  name: "活力", stat: MaxHp,    min: 8.0,  max: 20.0, per_lvl: 1.2, prefix: false),
+        (id: "light",  name: "轻盈", stat: MovePct,  min: 3.0,  max: 8.0,  per_lvl: 0.2, prefix: false),
+        (id: "cruel",  name: "残忍", stat: CritDmg,  min: 8.0,  max: 20.0, per_lvl: 0.6, prefix: false),
+    ],
+
+    // 掉落表：chance 过滤 → weight 抽 1 条
+    tables: {
+        "dummy_loot": [
+            (item: "coin", weight: 40, min: 3, max: 12, chance: 0.9),
+            (item: "cloth", weight: 18, min: 1, max: 2, chance: 0.35),
+            (item: "gel", weight: 15, min: 1, max: 2, chance: 0.35),
+            (item: "GEAR_RANDOM", weight: 12, chance: 0.4),
+            (item: "potion_hp", weight: 8, min: 1, max: 1, chance: 0.18),
+        ],
+        "monster_loot": [
+            (item: "coin", weight: 40, min: 2, max: 8, chance: 0.8),
+            (item: "GEAR_RANDOM", weight: 14, chance: 0.3),
+            (item: "potion_hp", weight: 8, min: 1, max: 1, chance: 0.15),
+            (item: "gel", weight: 10, min: 1, max: 1, chance: 0.25),
+        ],
+        "elite_loot": [
+            (item: "coin", weight: 30, min: 12, max: 30, chance: 1.0),
+            (item: "GEAR_RANDOM", weight: 30, chance: 1.0),
+            (item: "potion_hp", weight: 12, min: 1, max: 2, chance: 0.5),
+        ],
+        "boss_loot": [
+            (item: "coin", weight: 40, min: 80, max: 200, chance: 1.0),
+            (item: "GEAR_RANDOM", weight: 40, chance: 1.0),
+            (item: "potion_hp", weight: 20, min: 2, max: 4, chance: 1.0),
+        ],
+    },
+
+    // 合成配方
+    recipes: [
+        (out: "potion_hp",   count: 1, cost: [("cloth", 3), ("gel", 2)]),
+        (out: "sword_iron",  count: 1, cost: [("gel", 6), ("cloth", 5)]),
+        (out: "helm_iron",   count: 1, cost: [("gel", 4), ("cloth", 6)]),
+    ],
+)

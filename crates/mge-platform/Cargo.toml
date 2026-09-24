@@ -1,0 +1,9 @@
+[package]
+name = "mge-platform"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+mge-core = { workspace = true }
+glam = { workspace = true }
+winit = { workspace = true }

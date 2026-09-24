@@ -1,0 +1,17 @@
+[package]
+name = "mge-runtime"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+mge-core = { workspace = true }
+mge-platform = { workspace = true }
+mge-render = { workspace = true }
+glam = { workspace = true }
+winit = { workspace = true }
+wgpu = { workspace = true }
+pollster = { workspace = true }
+image = { workspace = true }
+tracing = { workspace = true }
+egui = { workspace = true }
+egui-winit = { workspace = true }

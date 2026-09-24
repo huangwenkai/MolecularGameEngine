@@ -1,0 +1,10 @@
+[package]
+name = "mge-sim"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+mge-core = { workspace = true }
+serde = { workspace = true }
+ron = { workspace = true }
+tracing = { workspace = true }

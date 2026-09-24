@@ -1,0 +1,6 @@
+/target
+screenshots/
+*.log
+saves/
+buildtail.txt
+git_status.txt

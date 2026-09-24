@@ -1,0 +1,13 @@
+[package]
+name = "mge-render"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+mge-core = { workspace = true }
+glam = { workspace = true }
+wgpu = { workspace = true }
+bytemuck = { workspace = true }
+image = { workspace = true }
+egui = { workspace = true }
+pollster = { workspace = true }
