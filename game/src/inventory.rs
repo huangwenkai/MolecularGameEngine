@@ -31,7 +31,8 @@ pub struct Inventory {
 
 impl Inventory {
     pub fn new() -> Self {
-        Self { bag: vec![None; BAG_SIZE], ..Default::default() }
+        // 等级从 1 起（0 会让 max_hp 公式的 level-1 下溢）
+        Self { bag: vec![None; BAG_SIZE], level: 1, ..Default::default() }
     }
 
     /// 升级所需经验

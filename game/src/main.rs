@@ -285,7 +285,7 @@ impl App for GameApp {
 
         // ---- 暗黑层：聚合属性 / 药水 / 背包 / max_hp / 移速 ----
         let st = self.inv.aggregate(&self.db);
-        self.player.max_hp = 100.0 + st.hp + (self.inv.level - 1) as f32 * 8.0;
+        self.player.max_hp = 100.0 + st.hp + self.inv.level.saturating_sub(1) as f32 * 8.0;
         self.player.move_mult = 1.0 + st.move_pct / 100.0;
         if ctx.input.just_pressed(Action::Inventory) {
             self.inv.ui_open = !self.inv.ui_open;
