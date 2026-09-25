@@ -31,7 +31,120 @@ fn put_if_empty(pixels: &mut PixelWorld, mats: &Materials, rng: &mut Rng, x: i32
     }
 }
 
-pub fn generate(seed: u64, pixels: &mut PixelWorld, mats: &Materials) -> GenResult {
+/// 仅空位写入指定明度的像素（树/装饰用，明度 0..=255，128 为标准亮度）
+fn put_shade_if_empty(pixels: &mut PixelWorld, x: i32, y: i32, mat: u8, shade: i32) {
+    if mat == 0 || x < 0 || y < 0 || x >= pixels.w || y >= pixels.h {
+        return;
+    }
+    if pixels.get(x, y).mat != 0 {
+        return;
+    }
+    pixels.set(x, y, Pixel { mat, shade: shade.clamp(0, 255) as u8, life: 0, aux: 0 });
+}
+
+/// 椭圆树冠：边缘噪声锯齿，下暗上亮（背景层叶子，有体积感）
+fn canopy(pixels: &mut PixelWorld, rng: &mut Rng, cx: i32, cy: i32, rx: i32, ry: i32, leaf: u8) {
+    if leaf == 0 || rx <= 0 || ry <= 0 {
+        return;
+    }
+    for dy in (-ry - 1)..=(ry + 1) {
+        for dx in (-rx - 1)..=(rx + 1) {
+            let d2 = (dx * dx) as f32 / (rx * rx) as f32 + (dy * dy) as f32 / (ry * ry) as f32;
+            if d2 > 1.0 {
+                continue;
+            }
+            // 边缘随机锯齿，避免"完美椭圆"的假感
+            if d2 > 0.5 && rng.chance((d2 - 0.5) * 1.7) {
+                continue;
+            }
+            let shade = 118 - dy * 9 + rng.range_i32(-14, 14);
+            put_shade_if_empty(pixels, cx + dx, cy + dy, leaf, shade);
+        }
+    }
+}
+
+/// 阔叶树（森林）：弯曲渐细树干 + 根部外扩 + 侧枝 + 层叠树冠
+fn gen_oak(pixels: &mut PixelWorld, rng: &mut Rng, x: i32, s: i32, wood: u8, leaf: u8) {
+    let hgt = rng.range_i32(46, 74);
+    let lean = rng.range_i32(-5, 5);
+    // 树干：底部 4px 渐细至 2px，微弯，边缘暗中心亮（树皮立体感）
+    for dy in 1..=hgt {
+        let t = dy as f32 / hgt as f32;
+        let cx = x + (lean as f32 * t * t).round() as i32;
+        let wdt = if dy <= 4 { 4 } else if t > 0.75 { 2 } else { 3 };
+        let x0 = cx - wdt / 2;
+        for dx in 0..wdt {
+            let base = if dx == 0 || dx == wdt - 1 { 88 } else { 138 };
+            put_shade_if_empty(pixels, x0 + dx, s - dy, wood, base + rng.range_i32(-10, 10));
+        }
+    }
+    // 根部外扩
+    for dx in [-2i32, -1, 1, 2] {
+        put_shade_if_empty(pixels, x + dx, s - 1, wood, 96 + rng.range_i32(-8, 8));
+    }
+    // 侧枝（左右交替，向上伸展），记录枝端供叶团附着
+    let mut tips: Vec<(i32, i32)> = Vec::new();
+    let n_br = 2 + rng.range_i32(0, 2);
+    for i in 0..n_br {
+        let bh = (hgt * (50 + 20 * i) / 100).max(10);
+        let dir = if i % 2 == 0 { -1 } else { 1 };
+        let mut bx = x + dir * 2;
+        let mut by = s - bh;
+        let len = rng.range_i32(5, 11);
+        for _ in 0..len {
+            bx += dir;
+            if rng.chance(0.65) {
+                by -= 1;
+            }
+            put_shade_if_empty(pixels, bx, by, wood, 100 + rng.range_i32(-8, 8));
+            if rng.chance(0.4) {
+                put_shade_if_empty(pixels, bx, by - 1, wood, 112 + rng.range_i32(-8, 8));
+            }
+        }
+        tips.push((bx, by));
+    }
+    // 主树冠 + 枝端叶团
+    let top_y = s - hgt;
+    let (rx, ry) = (rng.range_i32(9, 13), rng.range_i32(6, 9));
+    canopy(pixels, rng, x + lean, top_y - 3, rx, ry, leaf);
+    for (tx, ty) in tips {
+        let (rx, ry) = (rng.range_i32(3, 5), rng.range_i32(3, 4));
+        canopy(pixels, rng, tx, ty - 2, rx, ry, leaf);
+    }
+}
+
+/// 松树（雪原）：细直树干 + 层叠三角冠
+fn gen_pine(pixels: &mut PixelWorld, rng: &mut Rng, x: i32, s: i32, wood: u8, leaf: u8) {
+    let hgt = rng.range_i32(58, 88);
+    for dy in 1..=hgt {
+        for (dx, base) in [(0i32, 92i32), (1, 126)] {
+            put_shade_if_empty(pixels, x + dx, s - dy, wood, base + rng.range_i32(-8, 8));
+        }
+    }
+    let mut ly = s - hgt;
+    let mut lw = 2.4f32 + rng.f32() * 1.5; // 顶层半宽（逐层加宽）
+    let layers = 4 + rng.range_i32(0, 2);
+    for _ in 0..layers {
+        let lh = rng.range_i32(7, 12);
+        for dy in 0..lh {
+            let hw = (lw * dy as f32 / lh as f32) as i32;
+            for dx in -hw..=hw {
+                let shade = 112 - dy * 5 + rng.range_i32(-12, 12);
+                put_shade_if_empty(pixels, x + dx, ly + dy, leaf, shade);
+            }
+        }
+        ly += lh - 3;
+        lw += 2.0 + rng.f32() * 1.6;
+    }
+}
+
+pub fn generate(
+    seed: u64,
+    pixels: &mut PixelWorld,
+    mats: &Materials,
+    walls: &mut [u8],
+    wall_shade: &mut [u8],
+) -> GenResult {
     let (w, h) = (pixels.w, pixels.h);
     let id = |name: &str| mats.id(name).unwrap_or(0);
     let (dirt, grass, stone, wood, leaf) =
@@ -148,36 +261,57 @@ pub fn generate(seed: u64, pixels: &mut PixelWorld, mats: &Materials) -> GenResu
         }
     }
 
-    // ---- 树 ----
+    // ---- 树（背景装饰：树干不碰撞、不遮挡角色，角色可从树前走过）----
+    let mut last_tree = -999i32;
     for x in 16..w - 16 {
         let b = biome(x);
         let (density, ground) = match b {
-            1 => (0.006, grass),
-            0 => (0.003, snowpack),
+            1 => (0.012, grass),
+            0 => (0.006, snowpack),
             _ => (0.0, grass),
         };
-        if !rng.chance(density) {
+        if density == 0.0 || !rng.chance(density) || x - last_tree < 26 {
             continue;
         }
         let s = surf[x as usize];
         if pixels.get(x, s).mat != ground || pixels.get(x, s - 1).mat != 0 {
             continue;
         }
-        let hh = rng.range_i32(40, 72);
-        for dy in 1..=hh {
-            put(pixels, mats, &mut rng, x, s - dy, wood);
-            put(pixels, mats, &mut rng, x + 1, s - dy, wood);
+        last_tree = x;
+        if b == 0 {
+            gen_pine(pixels, &mut rng, x, s, wood, leaf);
+        } else {
+            gen_oak(pixels, &mut rng, x, s, wood, leaf);
         }
-        let top = s - hh;
-        let r = rng.range_i32(8, 14);
-        for dy in -(r + 2)..=(r / 2) {
-            for dx in -(r + 2)..=(r + 2) {
-                if dx * dx + dy * dy * 2 <= r * r {
-                    let (lx, ly) = (x + dx, top + dy);
-                    if pixels.get(lx, ly).mat == 0 {
-                        put(pixels, mats, &mut rng, lx, ly, leaf);
-                    }
+    }
+
+    // ---- 背景墙（地下洞穴背景，泰拉瑞亚式：4px/格，洞穴中保留形成封闭背景）----
+    let (wall_dirt, wall_stone) = (id("wall_dirt"), id("wall_stone"));
+    let (wall_snow, wall_sand) = (id("wall_snow"), id("wall_sand"));
+    if wall_dirt > 0 {
+        let gw = (w / 4) as usize;
+        for cy in 0..(h / 4) {
+            for cx in 0..(w / 4) {
+                let px = cx * 4 + 2;
+                let py = cy * 4 + 2;
+                let s = surf[((px).min(w - 1)) as usize];
+                if py <= s + 6 {
+                    continue; // 地表浅层无墙（露出天空）
                 }
+                let depth = py - s;
+                let dirt_depth = 48 + (fbm_terr2.get([px as f64 * 0.05, 999.0]) * 28.0) as i32;
+                let m = if depth > dirt_depth + 6 {
+                    wall_stone
+                } else {
+                    match biome(px) {
+                        0 => wall_snow,
+                        2 => wall_sand,
+                        _ => wall_dirt,
+                    }
+                };
+                let i = cy as usize * gw + cx as usize;
+                walls[i] = m;
+                wall_shade[i] = (122 + rng.range_i32(-8, 8)) as u8;
             }
         }
     }

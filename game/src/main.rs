@@ -195,8 +195,12 @@ impl App for GameApp {
             .set_world_texture(self.world.pixels.w as u32, self.world.pixels.h as u32);
         ctx.renderer
             .set_light_texture(self.world.light.cw as u32, self.world.light.ch as u32);
+        // 背景墙纹理（生成后不变，上传一次）
+        ctx.renderer
+            .set_wall_texture(self.world.wall_w as u32, self.world.wall_h as u32);
+        ctx.renderer.upload_walls(&self.world.wall_texture_data());
 
-        // 出生点空地：清理树木（像素）—— 覆盖树冠最高点与斜坡低处，避免残留光杆树干
+        // 出生点空地：清理树木（背景像素）—— 覆盖树冠最高点与斜坡低处，避免残留光杆树干
         let wood = self.world.mats.id("wood").unwrap_or(0);
         let leaf = self.world.mats.id("leaf").unwrap_or(0);
         let stx = self.world.spawn_x;
@@ -707,10 +711,20 @@ impl App for GameApp {
         ));
 
         // ---- 世界纹理上传（地形+动态像素同源，按脏 chunk 粒度）----
+        // 背景材质（树/叶/浆果丛/绳索）在材质字节打最高位标记 → 背景通道绘制（不遮挡角色）
+        let bg_mats: Vec<u8> = ["wood", "leaf", "berry", "rope"]
+            .iter()
+            .filter_map(|n| self.world.mats.id(n))
+            .collect();
         {
             let mut data = Vec::with_capacity(128 * 128 * 2);
             for (ci, rect) in self.world.pending_uploads.drain(..) {
                 self.world.pixels.export_chunk_data(ci, &mut data);
+                for i in (0..data.len()).step_by(2) {
+                    if bg_mats.contains(&data[i]) {
+                        data[i] += 128;
+                    }
+                }
                 ctx.renderer.upload_world(rect.x.max(0) as u32, rect.y.max(0) as u32, rect.w as u32, rect.h as u32, &data);
             }
         }

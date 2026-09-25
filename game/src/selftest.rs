@@ -22,6 +22,8 @@ const SHOTS: &[(u64, &str)] = &[
     (850, "06_combat"),
     (928, "09_vfx"),
     (980, "07_night"),
+    (1228, "15_cave_walls"),
+    (1248, "14_trees"),
 ];
 
 pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
@@ -625,6 +627,55 @@ pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
                 if pass { "PASS" } else { "FAIL" },
             );
             ctx.request_screenshot("screenshots/13_anim.png");
+        }
+        // ---- 背景树 / 背景墙验收截图：传送至洞穴内部与森林地表 ----
+        1205 => {
+            // 展示厅：在出生点右侧地下（泥土墙层）挖一个 60x28 的房间 + 火把，验证背景墙渲染
+            let (sx, sy) = (game.world.spawn_x + 140, game.world.spawn_y + 72);
+            for dy in -14..14 {
+                for dx in -30..30 {
+                    if game.world.pixels.get(sx + dx, sy + dy).mat != 0 {
+                        game.world.pixels.clear_px(sx + dx, sy + dy);
+                    }
+                }
+            }
+            game.world.place_torch(sx - 20, sy + 13);
+            game.world.place_torch(sx + 20, sy + 13);
+            game.player.pos = Vec2::new(sx as f32 + 0.5, sy as f32 + 13.0);
+            game.player.vel = Vec2::ZERO;
+            println!("[SELFTEST] wall showroom carved at ({sx},{sy})");
+        }
+        1210 => {
+            game.world.time = 0.30;
+        }
+        1230 => {
+            // 森林地表：查看新树（背景层）
+            let tx = game.world.spawn_x + 700;
+            let sy = game.surface_y(tx);
+            game.player.pos = Vec2::new(tx as f32 + 0.5, sy as f32 - 2.0);
+            game.player.vel = Vec2::ZERO;
+            game.world.time = 0.30;
+            // 调试：统计右侧森林区域的树像素
+            let (wood, leaf) = (
+                game.world.mats.id("wood").unwrap_or(0),
+                game.world.mats.id("leaf").unwrap_or(0),
+            );
+            let (mut wn, mut ln) = (0u32, 0u32);
+            let mut cols: Vec<i32> = Vec::new();
+            for x in 2300..3300 {
+                for y in 300..800 {
+                    let m = game.world.pixels.get(x, y).mat;
+                    if m == wood {
+                        wn += 1;
+                        cols.push(x);
+                    } else if m == leaf {
+                        ln += 1;
+                    }
+                }
+            }
+            cols.dedup();
+            let (minx, maxx) = (cols.first().copied().unwrap_or(0), cols.last().copied().unwrap_or(0));
+            println!("[SELFTEST] tree px wood {wn} leaf {ln} | trunk cols {} span {minx}..{maxx}", cols.len());
         }
         // 入夜
         935 => {

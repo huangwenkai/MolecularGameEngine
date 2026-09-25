@@ -25,7 +25,8 @@
         (name: "dirt",     kind: Static, solid: true,  color: (121, 85, 58),   jitter: 26, hp: 3,  drop: Some("dirt_debris")),
         (name: "grass",    kind: Static, solid: true,  color: (96, 152, 62),   jitter: 22, hp: 3,  drop: Some("dirt_debris")),
         (name: "stone",    kind: Static, solid: true,  color: (122, 122, 128), jitter: 22, hp: 8,  drop: Some("stone_debris")),
-        (name: "wood",     kind: Static, solid: true,  color: (150, 108, 58),  jitter: 20, hp: 5,  flammable: 200, drop: Some("wood_debris")),
+        // 树干/树叶为"背景树"：不碰撞（角色可穿过）、由背景通道绘制（不遮挡角色）
+        (name: "wood",     kind: Static, solid: false, color: (150, 108, 58),  jitter: 20, hp: 5,  flammable: 200, drop: Some("wood_debris")),
         (name: "leaf",     kind: Static, solid: false, color: (70, 130, 52),   jitter: 26, hp: 1,  flammable: 230),
         (name: "sandstone", kind: Static, solid: true, color: (206, 164, 98),  jitter: 20, hp: 3,  drop: Some("sand")),
         (name: "snowpack", kind: Static, solid: true,  color: (226, 232, 240), jitter: 12, hp: 2,  drop: Some("snow")),
@@ -36,5 +37,11 @@
         (name: "platform", kind: Static, solid: false, platform: true, color: (160, 120, 70), jitter: 16, hp: 4, drop: Some("wood_debris")),
         (name: "rope",     kind: Static, solid: false, climbable: true, color: (150, 110, 60), jitter: 14, hp: 2, drop: Some("wood_debris")),
         (name: "torch",    kind: Static, solid: false, light: 224, hp: 1, color: (255, 190, 80), jitter: 0, drop: Some("wood_debris")),
+
+        // ---- 背景墙（仅背景层渲染：洞穴/地下背景，压暗显示，不参与模拟/碰撞/光照遮挡）----
+        (name: "wall_dirt",  kind: Static, color: (88, 62, 42),   jitter: 12),
+        (name: "wall_stone", kind: Static, color: (74, 74, 82),   jitter: 10),
+        (name: "wall_snow",  kind: Static, color: (128, 136, 152), jitter: 10),
+        (name: "wall_sand",  kind: Static, color: (148, 116, 72), jitter: 10),
     ],
 )

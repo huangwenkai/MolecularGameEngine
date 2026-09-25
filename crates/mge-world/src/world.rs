@@ -21,6 +21,11 @@ pub struct World {
     pub pixels: PixelWorld,
     pub mats: Materials,
     pub light: LightMap,
+    /// 背景墙网格（4px/格 材质 id，0 = 无墙；仅背景层渲染，不参与模拟/碰撞）
+    pub wall_w: i32,
+    pub wall_h: i32,
+    pub walls: Vec<u8>,
+    pub wall_shade: Vec<u8>,
     /// 一天的时间 0..1（0 = 黎明）
     pub time: f32,
     /// 一天的现实秒数
@@ -61,7 +66,10 @@ impl World {
     pub fn new(seed: u64, w_px: i32, h_px: i32) -> Self {
         let mats = Materials::embedded();
         let mut pixels = PixelWorld::new(seed, w_px, h_px, &mats);
-        let gr = gen::generate(seed, &mut pixels, &mats);
+        let (wall_w, wall_h) = (w_px / 4, h_px / 4);
+        let mut walls = vec![0u8; (wall_w * wall_h) as usize];
+        let mut wall_shade = vec![0u8; (wall_w * wall_h) as usize];
+        let gr = gen::generate(seed, &mut pixels, &mats, &mut walls, &mut wall_shade);
         let light = LightMap::new(
             (w_px + LIGHT_CELL - 1) / LIGHT_CELL,
             (h_px + LIGHT_CELL - 1) / LIGHT_CELL,
@@ -71,6 +79,10 @@ impl World {
             pixels,
             mats,
             light,
+            wall_w,
+            wall_h,
+            walls,
+            wall_shade,
             time: 0.20,
             day_len: 480.0,
             spawn_x: gr.spawn_x,
@@ -111,6 +123,17 @@ impl World {
     /// 取走光照纹理上传任务（全量 / 多个区域）
     pub fn take_light_uploads(&mut self) -> Vec<LightUpload> {
         std::mem::take(&mut self.light_uploads)
+    }
+
+    /// 背景墙纹理数据（RG 交错：材质 + 明度；生成后不变，初始化上传一次）
+    pub fn wall_texture_data(&self) -> Vec<u8> {
+        let n = (self.wall_w * self.wall_h) as usize;
+        let mut out = Vec::with_capacity(n * 2);
+        for i in 0..n {
+            out.push(self.walls[i]);
+            out.push(self.wall_shade[i]);
+        }
+        out
     }
 
     /// 推进一逻辑帧（1/60s）

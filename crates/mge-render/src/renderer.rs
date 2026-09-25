@@ -31,6 +31,10 @@ pub struct Renderer {
 
     sprite_pipe: wgpu::RenderPipeline,
     pixels_pipe: wgpu::RenderPipeline,
+    /// 背景像素管线（树等背景层，材质字节高位标记）
+    pixels_bg_pipe: wgpu::RenderPipeline,
+    /// 背景墙管线（4px/格 洞穴背景）
+    walls_pipe: wgpu::RenderPipeline,
     composite_pipe: wgpu::RenderPipeline,
     bloom_bright_pipe: wgpu::RenderPipeline,
     bloom_blur_pipe: wgpu::RenderPipeline,
@@ -62,6 +66,8 @@ pub struct Renderer {
     world: Option<(wgpu::Texture, wgpu::TextureView, u32, u32)>,
     palette: Option<wgpu::TextureView>,
     light: Option<(wgpu::Texture, wgpu::TextureView, u32, u32)>,
+    /// 背景墙纹理（RG8：材质 + 明度，1 texel = 4px 块）
+    wall: Option<(wgpu::Texture, wgpu::TextureView, u32, u32)>,
     world_size: (u32, u32),
     scene: Option<(wgpu::Texture, wgpu::TextureView, u32, u32)>,
 
@@ -328,6 +334,22 @@ impl Renderer {
             &targets,
             &[Self::sprite_vlayout()],
         );
+        let pixels_bg_pipe = Self::make_pipe_entry(
+            &device,
+            &pixels_shader,
+            &[&camera_bg_layout, &pixels_bg_layout],
+            &targets,
+            &[Self::sprite_vlayout()],
+            Some("fs_bg"),
+        );
+        let walls_pipe = Self::make_pipe_entry(
+            &device,
+            &pixels_shader,
+            &[&camera_bg_layout, &pixels_bg_layout],
+            &targets,
+            &[Self::sprite_vlayout()],
+            Some("fs_walls"),
+        );
         let composite_pipe = Self::make_pipe(&device, &composite_shader, &[&composite_bg_layout], &targets, &[]);
         // Bloom：亮部提取与模糊（h/v 共用模糊管线，方向由各自 ubo 提供）
         let bloom_bright_pipe = Self::make_pipe_entry(
@@ -369,6 +391,8 @@ impl Renderer {
             format,
             sprite_pipe,
             pixels_pipe,
+            pixels_bg_pipe,
+            walls_pipe,
             composite_pipe,
             bloom_bright_pipe,
             bloom_blur_pipe,
@@ -394,6 +418,7 @@ impl Renderer {
             world: None,
             palette: None,
             light: None,
+            wall: None,
             world_size: (4096, 2048),
             scene: None,
             samp_nearest,
@@ -517,6 +542,22 @@ impl Renderer {
                     &[&self.camera_bg_layout, &self.pixels_bg_layout],
                     &targets,
                     &[Self::sprite_vlayout()],
+                );
+                self.pixels_bg_pipe = Self::make_pipe_entry(
+                    &self.device,
+                    &sm,
+                    &[&self.camera_bg_layout, &self.pixels_bg_layout],
+                    &targets,
+                    &[Self::sprite_vlayout()],
+                    Some("fs_bg"),
+                );
+                self.walls_pipe = Self::make_pipe_entry(
+                    &self.device,
+                    &sm,
+                    &[&self.camera_bg_layout, &self.pixels_bg_layout],
+                    &targets,
+                    &[Self::sprite_vlayout()],
+                    Some("fs_walls"),
                 );
             }
             ShaderKind::Composite => {
@@ -642,6 +683,43 @@ impl Renderer {
         let view = tex.create_view(&Default::default());
         self.world = Some((tex, view, w, h));
         self.world_size = (w, h);
+    }
+
+    /// 背景墙纹理（RG8：材质 + 明度，1 texel = 4px 块）
+    pub fn set_wall_texture(&mut self, w: u32, h: u32) {
+        let tex = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("walls"),
+            size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rg8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let view = tex.create_view(&Default::default());
+        self.wall = Some((tex, view, w, h));
+    }
+
+    /// 上传整张背景墙纹理（生成后不变，初始化调用一次）
+    pub fn upload_walls(&mut self, data: &[u8]) {
+        let Some((tex, _, w, h)) = &self.wall else { return };
+        let tex = tex.clone();
+        self.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &tex,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            data,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(w * 2),
+                rows_per_image: None,
+            },
+            wgpu::Extent3d { width: *w, height: *h, depth_or_array_layers: 1 },
+        );
     }
 
     /// 调色板（256 色）
@@ -868,6 +946,18 @@ impl Renderer {
                 ],
             })
         });
+        let wall_bg = self.wall.as_ref().zip(self.palette.as_ref()).map(|((_, wv, _, _), pv)| {
+            self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("wall-bg"),
+                layout: &self.pixels_bg_layout,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::Sampler(&self.samp_nearest) },
+                    wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(wv) },
+                    wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&self.samp_nearest) },
+                    wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(pv) },
+                ],
+            })
+        });
         let scene_view = self.scene.as_ref().unwrap().1.clone();
         let bloom_a_view = self.bloom_a.clone();
         let bloom_b_view = self.bloom_b.clone();
@@ -934,6 +1024,26 @@ impl Renderer {
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
+            // ---- 场景分层（远 → 近）：背景墙 → 背景像素(树) → 图集精灵(实体/角色) → 前景地形 ----
+            // 世界四边形顶点位于 vbuf 的 atlas_verts.len() 偏移处（与前景通道相同区间）
+            let world_range =
+                atlas_verts.len() as u32..(atlas_verts.len() + world_verts.len()) as u32;
+            // 背景墙（洞穴/地下背景，压暗）
+            if let (Some(bg), false) = (wall_bg.as_ref(), world_verts.is_empty()) {
+                pass.set_pipeline(&self.walls_pipe);
+                pass.set_bind_group(0, &self.camera_bg, &[]);
+                pass.set_bind_group(1, bg, &[]);
+                pass.set_vertex_buffer(0, self.vbuf.slice(..));
+                pass.draw(world_range.clone(), 0..1);
+            }
+            // 背景像素（树干/树冠/浆果丛/绳索）——在角色之前绘制，不再遮挡角色
+            if let (Some(bg), false) = (world_bg.as_ref(), world_verts.is_empty()) {
+                pass.set_pipeline(&self.pixels_bg_pipe);
+                pass.set_bind_group(0, &self.camera_bg, &[]);
+                pass.set_bind_group(1, bg, &[]);
+                pass.set_vertex_buffer(0, self.vbuf.slice(..));
+                pass.draw(world_range.clone(), 0..1);
+            }
             pass.set_pipeline(&self.sprite_pipe);
             pass.set_bind_group(0, &self.camera_bg, &[]);
             pass.set_vertex_buffer(0, self.vbuf.slice(..));

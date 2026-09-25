@@ -32,8 +32,43 @@ fn vs_main(in: VIn) -> VOut {
 @fragment
 fn fs_main(in: VOut) -> @location(0) vec4<f32> {
     let m = textureSample(tex, samp, in.uv);
-    let idx = u32(m.r * 255.0 + 0.5);
+    // 材质字节最高位 = 背景标记（树等背景像素）：前景通道跳过，由 fs_bg 绘制
+    let b = m.r * 255.0;
+    if (b >= 127.5) {
+        discard;
+    }
+    let idx = u32(b + 0.5);
     let base = textureSampleLevel(palette, psamp, vec2<f32>((f32(idx) + 0.5) / 256.0, 0.5), 0.0);
     let shade = 0.75 + 0.5 * m.g;
     return vec4<f32>(base.rgb * shade, base.a) * in.color;
+}
+
+/// 背景像素通道：只绘制带背景标记的像素（树干/树叶/浆果丛/绳索）
+/// 角色/实体在其之前绘制 → 树永远在角色身后，不再遮挡角色
+@fragment
+fn fs_bg(in: VOut) -> @location(0) vec4<f32> {
+    let m = textureSample(tex, samp, in.uv);
+    let b = m.r * 255.0;
+    if (b < 127.5) {
+        discard;
+    }
+    let idx = u32(b - 127.5);
+    let base = textureSampleLevel(palette, psamp, vec2<f32>((f32(idx) + 0.5) / 256.0, 0.5), 0.0);
+    let shade = 0.75 + 0.5 * m.g;
+    return vec4<f32>(base.rgb * shade, base.a) * in.color;
+}
+
+/// 背景墙通道：RG 纹理（材质 + 明度），4px/格，压暗渲染形成洞穴/地下背景
+@fragment
+fn fs_walls(in: VOut) -> @location(0) vec4<f32> {
+    let m = textureSample(tex, samp, in.uv);
+    let b = m.r * 255.0;
+    if (b < 0.5) {
+        discard;
+    }
+    let idx = u32(b + 0.5);
+    let base = textureSampleLevel(palette, psamp, vec2<f32>((f32(idx) + 0.5) / 256.0, 0.5), 0.0);
+    let shade = 0.75 + 0.5 * m.g;
+    // 墙体压暗（泰拉瑞亚式背景层次），光照仍由 composite 统一叠加
+    return vec4<f32>(base.rgb * shade * 0.65, base.a) * in.color;
 }
