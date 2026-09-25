@@ -732,6 +732,27 @@ impl Renderer {
         );
     }
 
+    /// 上传光照纹理区域（RG 交错字节，局部重算用）
+    pub fn upload_light_region(&mut self, x: u32, y: u32, w: u32, h: u32, data: &[u8]) {
+        let Some((tex, _, tw, th)) = &self.light else { return };
+        let tex = tex.clone();
+        self.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &tex,
+                mip_level: 0,
+                origin: wgpu::Origin3d { x, y, z: 0 },
+                aspect: wgpu::TextureAspect::All,
+            },
+            data,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(w * 2),
+                rows_per_image: None,
+            },
+            wgpu::Extent3d { width: w.min(*tw - x), height: h.min(*th - y), depth_or_array_layers: 1 },
+        );
+    }
+
     fn ensure_scene(&mut self, w: u32, h: u32) {
         let matches = self
             .scene

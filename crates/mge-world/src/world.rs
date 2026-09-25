@@ -4,11 +4,17 @@ use crate::light::{LightMap, LIGHT_CELL};
 use mge_core::events::Events;
 use mge_core::rng::Rng;
 use mge_sim::materials::Kind;
-use mge_sim::{Materials, Pixel, PixelWorld, SimHooks};
+use mge_sim::{Materials, Pixel, PixelWorld, Rect, SimHooks};
 
 #[derive(Debug, Clone, Copy)]
 pub enum WorldEvent {
     Explosion { x: f32, y: f32 },
+}
+
+/// 光照纹理上传任务（全量 / 区域）
+pub enum LightUpload {
+    Full(Vec<u8>),
+    Region { x: u32, y: u32, w: u32, h: u32, data: Vec<u8> },
 }
 
 pub struct World {
@@ -25,8 +31,13 @@ pub struct World {
     pub torches: Vec<(i32, i32)>,
     torch_mat: u8,
     terrain_dirty: bool,
-    light_dirty: bool,
     light_frame: u32,
+    /// 本帧变化的 chunk（供渲染器按 chunk 上传纹理）
+    pub pending_uploads: Vec<(usize, Rect)>,
+    light_uploads: Vec<LightUpload>,
+    /// 性能统计（毫秒累计，外部定期读取清零）
+    pub perf_sim_ms: f32,
+    pub perf_light_ms: f32,
     rng: Rng,
     pub events: Events<WorldEvent>,
 }
@@ -49,7 +60,7 @@ impl SimHooks for WorldHooks<'_> {
 impl World {
     pub fn new(seed: u64, w_px: i32, h_px: i32) -> Self {
         let mats = Materials::embedded();
-        let mut pixels = PixelWorld::new(w_px, h_px, &mats);
+        let mut pixels = PixelWorld::new(seed, w_px, h_px, &mats);
         let gr = gen::generate(seed, &mut pixels, &mats);
         let light = LightMap::new(
             (w_px + LIGHT_CELL - 1) / LIGHT_CELL,
@@ -67,8 +78,11 @@ impl World {
             torches: Vec::new(),
             torch_mat,
             terrain_dirty: true,
-            light_dirty: false,
             light_frame: 0,
+            pending_uploads: Vec::new(),
+            light_uploads: Vec::new(),
+            perf_sim_ms: 0.0,
+            perf_light_ms: 0.0,
             rng: Rng::new(seed ^ 0x5EED_5EED),
             events: Events::new(),
         }
@@ -94,26 +108,50 @@ impl World {
         self.terrain_dirty = true;
     }
 
-    /// 是否需要重新上传光照纹理（并清除标记）
-    pub fn take_light_dirty(&mut self) -> bool {
-        std::mem::take(&mut self.light_dirty)
+    /// 取走光照纹理上传任务（全量 / 多个区域）
+    pub fn take_light_uploads(&mut self) -> Vec<LightUpload> {
+        std::mem::take(&mut self.light_uploads)
     }
 
     /// 推进一逻辑帧（1/60s）
     pub fn update(&mut self) {
+        let t0 = std::time::Instant::now();
         self.time = (self.time + 1.0 / 60.0 / self.day_len) % 1.0;
 
         // 像素模拟（字段拆分借用）
-        let World { pixels, mats, light, .. } = self;
-        pixels.step(mats, &mut WorldHooks { light });
+        self.pixels.step(&self.mats, &mut WorldHooks { light: &mut self.light });
+        self.perf_sim_ms += t0.elapsed().as_secs_f32() * 1000.0;
 
+        let t1 = std::time::Instant::now();
         self.light.decay_emissive();
+
+        // 像素变化 chunk → 光照脏格（局部重算的数据来源）
+        let changed = self.pixels.take_dirty_chunks();
+        for (_, r) in &changed {
+            self.light.mark_px_rect(r);
+        }
+        self.light.mark_glow();
+        self.pending_uploads = changed;
+
         self.light_frame += 1;
-        if self.terrain_dirty || self.light_frame % 10 == 0 {
+        if self.terrain_dirty || self.light_frame % 120 == 0 {
+            // 全量重算：地形大改（爆炸/挖掘/放火把）或 2 秒安全网
             self.light.relight(&self.pixels, &self.mats, &self.torches);
             self.terrain_dirty = false;
-            self.light_dirty = true;
+            let rg = self.light.build_rg();
+            self.light_uploads = vec![LightUpload::Full(rg)];
+        } else {
+            // 区域重算：独立脏区逐个处理（每帧配额限制，剩余留到后续帧）
+            let bounds_list = self.light.relight_regions(&self.pixels, &self.mats, &self.torches);
+            self.light_uploads = bounds_list
+                .into_iter()
+                .map(|b| {
+                    let (x, y, w, h, data) = self.light.build_rg_region(b);
+                    LightUpload::Region { x, y, w, h, data }
+                })
+                .collect();
         }
+        self.perf_light_ms += t1.elapsed().as_secs_f32() * 1000.0;
     }
 
     /// 挖掘一个像素（累积伤害），破坏时掉落碎屑

@@ -3,4 +3,4 @@ pub mod gen;
 pub mod light;
 pub mod world;
 pub use light::{LightMap, LIGHT_CELL};
-pub use world::{World, WorldEvent};
+pub use world::{LightUpload, World, WorldEvent};

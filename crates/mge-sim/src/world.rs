@@ -97,7 +97,7 @@ pub struct PixelWorld {
     cw: i32,
     ch: i32,
     chunks: Vec<Chunk>,
-    dirty: Option<Rect>,
+    dirty_chunks: Vec<bool>,
     rng: Rng,
     tick: u64,
     pub ids: SimIds,
@@ -107,7 +107,7 @@ pub struct PixelWorld {
 }
 
 impl PixelWorld {
-    pub fn new(w: i32, h: i32, mats: &Materials) -> Self {
+    pub fn new(seed: u64, w: i32, h: i32, mats: &Materials) -> Self {
         assert!(w % CHUNK_PX as i32 == 0 && h % CHUNK_PX as i32 == 0);
         let cw = w / CHUNK_PX as i32;
         let ch = h / CHUNK_PX as i32;
@@ -124,8 +124,9 @@ impl PixelWorld {
             cw,
             ch,
             chunks,
-            dirty: None,
-            rng: Rng::from_entropy(),
+            dirty_chunks: vec![false; (cw * ch) as usize],
+            // 模拟 rng 由世界种子派生（同 seed 可复现；跨进程不再漂移）
+            rng: Rng::new(seed ^ 0x5A17_1D5E),
             tick: 0,
             ids: SimIds::new(mats),
             active_pixels: 0,
@@ -174,22 +175,55 @@ impl PixelWorld {
         }
     }
 
+    /// 标记脏矩形（自动覆盖到对应 chunk，供纹理按 chunk 上传）
     fn mark_dirty(&mut self, r: Rect) {
-        self.dirty = Some(match self.dirty {
-            Some(d) => {
-                let x = d.x.min(r.x);
-                let y = d.y.min(r.y);
-                let x1 = (d.x + d.w).max(r.x + r.w);
-                let y1 = (d.y + d.h).max(r.y + r.h);
-                Rect { x, y, w: x1 - x, h: y1 - y }
+        let c0x = (r.x.max(0) / CHUNK_PX as i32).clamp(0, self.cw - 1);
+        let c0y = (r.y.max(0) / CHUNK_PX as i32).clamp(0, self.ch - 1);
+        let c1x = ((r.x + r.w - 1).min(self.w - 1).max(0) / CHUNK_PX as i32).clamp(0, self.cw - 1);
+        let c1y = ((r.y + r.h - 1).min(self.h - 1).max(0) / CHUNK_PX as i32).clamp(0, self.ch - 1);
+        for cy in c0y..=c1y {
+            for cx in c0x..=c1x {
+                self.dirty_chunks[(cy * self.cw + cx) as usize] = true;
             }
-            None => r,
-        });
+        }
     }
 
-    /// 取走本帧脏矩形（用于纹理上传）
-    pub fn take_dirty(&mut self) -> Option<Rect> {
-        self.dirty.take()
+    #[inline]
+    fn mark_px(&mut self, x: i32, y: i32) {
+        let ci = self.chunk_index(x, y);
+        self.dirty_chunks[ci] = true;
+    }
+
+    /// 取走脏 chunk 列表（chunk 粒度纹理上传，避免脏矩形并集膨胀）
+    pub fn take_dirty_chunks(&mut self) -> Vec<(usize, Rect)> {
+        let mut out = Vec::new();
+        for (i, d) in self.dirty_chunks.iter_mut().enumerate() {
+            if *d {
+                *d = false;
+                let cx = (i as i32) % self.cw;
+                let cy = (i as i32) / self.cw;
+                out.push((
+                    i,
+                    Rect {
+                        x: cx * CHUNK_PX as i32,
+                        y: cy * CHUNK_PX as i32,
+                        w: CHUNK_PX as i32,
+                        h: CHUNK_PX as i32,
+                    },
+                ));
+            }
+        }
+        out
+    }
+
+    /// 导出单个 chunk 的 mat/shade 数据（纹理按 chunk 上传，直读切片零开销）
+    pub fn export_chunk_data(&self, ci: usize, out: &mut Vec<u8>) {
+        out.clear();
+        out.reserve(CHUNK_PX * CHUNK_PX * 2);
+        for p in &self.chunks[ci].px {
+            out.push(p.mat);
+            out.push(p.shade);
+        }
     }
 
     /// 导出整幅像素（mat/shade 交错，行主序）—— 存档用
@@ -220,7 +254,7 @@ impl PixelWorld {
                     Pixel { mat: data[i], shade: data[i + 1], life: 0, aux: 0 };
             }
         }
-        self.dirty = Some(Rect { x: 0, y: 0, w: self.w, h: self.h });
+        self.mark_dirty(Rect { x: 0, y: 0, w: self.w, h: self.h });
     }
 
     #[inline]
@@ -258,7 +292,7 @@ impl PixelWorld {
                 self.chunks[ci2].px[li2].aux &= !1;
             }
         }
-        self.mark_dirty(Rect { x, y, w: 1, h: 1 });
+        self.mark_px(x, y);
     }
 
     fn patch(&mut self, x: i32, y: i32, f: impl FnOnce(&mut Pixel)) {
@@ -267,7 +301,7 @@ impl PixelWorld {
         }
         let ci = self.chunk_index(x, y);
         f(&mut self.chunks[ci].px[Self::local_index(x, y)]);
-        self.mark_dirty(Rect { x, y, w: 1, h: 1 });
+        self.mark_px(x, y);
     }
 
     /// 带颜色抖动地生成一个材质像素（仅写入空格）
@@ -340,10 +374,12 @@ impl PixelWorld {
                 let y = y0 + ly as i32;
                 // 逐行交替扫描方向，消除左右偏差
                 let ltr = (y as usize).wrapping_add(tick as usize) & 1 == 0;
+                let row = ly * CHUNK_PX;
                 for li in 0..CHUNK_PX {
                     let lx = if ltr { li } else { CHUNK_PX - 1 - li };
                     let x = x0 + lx as i32;
-                    let p = self.get(x, y);
+                    // 直读 chunk 切片：省掉 get() 逐像素的除法/取模/钳制
+                    let p = self.chunks[ci].px[row + lx];
                     if p.mat == EMPTY || p.mat == OOB {
                         continue;
                     }

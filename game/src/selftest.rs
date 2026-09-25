@@ -632,9 +632,11 @@ pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
         970 => {
             let total = (game.world.pixels.w / 128) * (game.world.pixels.h / 128);
             println!(
-                "[SELFTEST] tick={} | avg {:.2}ms/tick | active_px {} | asleep {}/{} chunks",
+                "[SELFTEST] tick={} | avg {:.2}ms/tick | sim {:.2} light {:.2} | active_px {} | asleep {}/{} chunks",
                 tick,
                 game.tick_ms_sum / game.tick_count.max(1) as f32,
+                game.world.perf_sim_ms / game.tick_count.max(1) as f32,
+                game.world.perf_light_ms / game.tick_count.max(1) as f32,
                 game.world.pixels.active_pixels,
                 game.world.pixels.asleep_chunks,
                 total,

@@ -27,7 +27,7 @@ use mge_core::rng::Rng;
 use mge_platform::input::Action;
 use mge_render::{Region, SpriteBatch};
 use mge_runtime::{App, Engine, EngineCtx};
-use mge_world::{World, LIGHT_CELL};
+use mge_world::{LightUpload, World, LIGHT_CELL};
 use player::Player;
 use std::collections::HashMap;
 use tools::{Tool, ToolCtx};
@@ -616,29 +616,22 @@ impl App for GameApp {
             (self.player.pos.y as i32 - 10) / LIGHT_CELL,
         ));
 
-        // ---- 世界纹理上传（地形+动态像素同源）----
-        if let Some(rect) = self.world.pixels.take_dirty() {
-            let (rw, rh) = (rect.w.max(0) as usize, rect.h.max(0) as usize);
-            let mut data = Vec::with_capacity(rw * rh * 2);
-            for y in rect.y..rect.y + rect.h {
-                for x in rect.x..rect.x + rect.w {
-                    let p = self.world.pixels.get(x, y);
-                    data.push(p.mat);
-                    data.push(p.shade);
+        // ---- 世界纹理上传（地形+动态像素同源，按脏 chunk 粒度）----
+        {
+            let mut data = Vec::with_capacity(128 * 128 * 2);
+            for (ci, rect) in self.world.pending_uploads.drain(..) {
+                self.world.pixels.export_chunk_data(ci, &mut data);
+                ctx.renderer.upload_world(rect.x.max(0) as u32, rect.y.max(0) as u32, rect.w as u32, rect.h as u32, &data);
+            }
+        }
+        // 光照纹理：仅上传重算产生的任务（全量 / 多个区域）
+        for up in self.world.take_light_uploads() {
+            match up {
+                LightUpload::Full(data) => ctx.renderer.upload_light(&data),
+                LightUpload::Region { x, y, w, h, data } => {
+                    ctx.renderer.upload_light_region(x, y, w, h, &data)
                 }
             }
-            ctx.renderer.upload_world(
-                rect.x.max(0) as u32,
-                rect.y.max(0) as u32,
-                rect.w.max(1) as u32,
-                rect.h.max(1) as u32,
-                &data,
-            );
-        }
-        // 光照纹理：仅在重算后上传
-        if self.world.take_light_dirty() {
-            let rg = self.world.light.build_rg();
-            ctx.renderer.upload_light(&rg);
         }
 
         // ---- 调试 ----
@@ -648,15 +641,19 @@ impl App for GameApp {
         if self.dbg.open && self.tick_count % 120 == 0 {
             let total = (self.world.pixels.w / 128) * (self.world.pixels.h / 128);
             tracing::info!(
-                "tick {} | {:.2}ms/tick | active_px {} | asleep chunks {}/{} | sprites {}",
+                "tick {} | {:.2}ms/tick | sim {:.2} light {:.2} | active_px {} | asleep chunks {}/{} | sprites {}",
                 self.tick_count,
                 self.tick_ms_sum / 120.0,
+                self.world.perf_sim_ms / 120.0,
+                self.world.perf_light_ms / 120.0,
                 self.world.pixels.active_pixels,
                 self.world.pixels.asleep_chunks,
                 total,
                 ctx.atlas_batch.verts.len() / 6,
             );
             self.tick_ms_sum = 0.0;
+            self.world.perf_sim_ms = 0.0;
+            self.world.perf_light_ms = 0.0;
         }
 
         self.tick_ms_sum += t0.elapsed().as_secs_f32() * 1000.0;
