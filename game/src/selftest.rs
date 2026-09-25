@@ -579,6 +579,52 @@ pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
                 sleep_ok,
             );
         }
+        // ---- M12：序列帧动画（运行时注册 → 播放 → 帧事件触发）----
+        1190 => {
+            use crate::anim::{AnimDef, AnimPlayer};
+            let mut frames = Vec::new();
+            for i in 0..3u8 {
+                let mut img = image::RgbaImage::new(8, 8);
+                for p in img.pixels_mut() {
+                    *p = image::Rgba([255, 40 * i, 60 * i, 255]);
+                }
+                frames.push(img);
+            }
+            let def = AnimDef {
+                name: "test_anim".into(),
+                sheet: "runtime_test.png".into(),
+                frame_w: 8,
+                frame_h: 8,
+                frame_times: vec![0.05, 0.05, 0.05],
+                events: vec![(1, "boom".into())],
+                r#loop: true,
+            };
+            let ok = game
+                .anims
+                .register_runtime(def, &frames, ctx.renderer)
+                .is_ok();
+            game.anim_preview = Some(AnimPlayer::new("test_anim"));
+            game.anim_last_event = None;
+            println!(
+                "[SELFTEST] anim register {}",
+                if ok { "OK" } else { "FAIL" },
+            );
+        }
+        1236 => {
+            let frame = game
+                .anim_preview
+                .as_ref()
+                .map(|p| p.frame)
+                .unwrap_or(255);
+            let n = game.anims.frame_count("test_anim");
+            let ev = game.anim_last_event.clone().unwrap_or_default();
+            let pass = n == 3 && frame < 3 && ev == "boom";
+            println!(
+                "[SELFTEST] anim play {} | frames {n} cur {frame} event '{ev}'",
+                if pass { "PASS" } else { "FAIL" },
+            );
+            ctx.request_screenshot("screenshots/13_anim.png");
+        }
         // 入夜
         935 => {
             game.world.time = 0.73;

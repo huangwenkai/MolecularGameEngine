@@ -12,6 +12,10 @@ pub enum Kind {
     Bat,
     /// 骷髅弓手：保持距离射箭
     Archer,
+    /// 僵尸：慢速高血近战（A* 寻路追击）
+    Zombie,
+    /// 地狱犬：快速低血近战（A* 寻路追击）
+    Hound,
     /// BOSS：多阶段
     Boss,
 }
@@ -75,6 +79,27 @@ pub struct Monster {
     pub phase: u8,
     pub phase_t: f32,
     pub anim: f32,
+    /// A* 路径（世界坐标 waypoints）
+    pub path: Vec<Vec2>,
+    pub path_i: usize,
+    /// 路径重算冷却
+    pub path_cd: f32,
+}
+
+impl Monster {
+    /// 导航方向：沿 A* 路径走向当前 waypoint（到达后推进）；无路径返回 None
+    fn nav_dir(&mut self) -> Option<f32> {
+        while self.path_i < self.path.len() {
+            let wp = self.path[self.path_i];
+            let dx = wp.x - self.pos.x;
+            if dx.abs() < 8.0 && (wp.y - self.pos.y).abs() < 22.0 {
+                self.path_i += 1;
+                continue;
+            }
+            return Some(dx.signum());
+        }
+        None
+    }
 }
 
 /// 敌方弹丸（弓手箭 / BOSS 弹幕）
@@ -105,6 +130,8 @@ impl Monsters {
             Kind::Slime => (Vec2::new(5.0, 4.0), 34.0, 8.0, 46.0, 6),
             Kind::Bat => (Vec2::new(4.0, 3.0), 18.0, 6.0, 82.0, 5),
             Kind::Archer => (Vec2::new(4.5, 8.0), 30.0, 0.0, 42.0, 8),
+            Kind::Zombie => (Vec2::new(4.5, 9.0), 72.0, 12.0, 30.0, 10),
+            Kind::Hound => (Vec2::new(6.0, 5.0), 40.0, 9.0, 95.0, 9),
             Kind::Boss => (Vec2::new(16.0, 14.0), 900.0, 18.0, 60.0, 150),
         };
         let (hp, dmg, speed) = match elite {
@@ -134,6 +161,9 @@ impl Monsters {
             phase: 0,
             phase_t: 0.0,
             anim: rng.range_f32(0.0, 6.0),
+            path: Vec::new(),
+            path_i: 0,
+            path_cd: 0.0,
         });
         if kind == Kind::Boss {
             self.boss_alive = true;
@@ -183,12 +213,14 @@ impl Monsters {
         } else {
             None
         };
-        match rng.range_i32(0, 2) {
+        match rng.range_i32(0, 4) {
             0 => self.spawn_one(Kind::Slime, Vec2::new(px as f32 + 0.5, surface as f32), rng, elite),
             1 => {
                 let fly = surface as f32 - rng.range_f32(40.0, 110.0);
                 self.spawn_one(Kind::Bat, Vec2::new(px as f32 + 0.5, fly), rng, elite);
             }
+            2 => self.spawn_one(Kind::Zombie, Vec2::new(px as f32 + 0.5, surface as f32), rng, elite),
+            3 => self.spawn_one(Kind::Hound, Vec2::new(px as f32 + 0.5, surface as f32), rng, elite),
             _ => self.spawn_one(Kind::Archer, Vec2::new(px as f32 + 0.5, surface as f32), rng, elite),
         }
         // 深夜 BOSS：一次性
@@ -266,14 +298,33 @@ impl Monsters {
             let rage = m.elite == Some(Elite::Berserk) && m.hp < m.max_hp * 0.4;
             let spd = m.speed * if rage { 1.5 } else { 1.0 };
 
+            // ---- A* 导航：地面怪追击/撤退时周期性重算路径 ----
+            m.path_cd -= 1.0 / 60.0;
+            if matches!(m.state, AiState::Chase | AiState::Flee)
+                && m.kind != Kind::Bat
+                && !m.boss
+                && m.path_cd <= 0.0
+            {
+                m.path_cd = 0.5;
+                let goal = if m.state == AiState::Flee { m.home } else { pcenter };
+                m.path = crate::astar::find_path(
+                    world,
+                    m.pos - Vec2::new(0.0, m.half.y),
+                    goal,
+                    320,
+                )
+                .unwrap_or_default();
+                m.path_i = 0;
+            }
+
             match m.kind {
                 Kind::Slime => {
-                    // 地面跳跃移动
+                    // 地面跳跃移动（追击沿 A* 路径）
                     m.vel.y += 900.0 / 60.0;
                     let grounded = m.vel.y == 0.0 && world.solid_px(m.pos.x as i32, (m.pos.y + 1.0) as i32);
                     if grounded {
                         let dir = match m.state {
-                            AiState::Chase => to_p.x.signum(),
+                            AiState::Chase => m.nav_dir().unwrap_or(to_p.x.signum()),
                             AiState::Flee => -to_p.x.signum(),
                             AiState::Patrol => {
                                 if m.state_t <= 0.0 {
@@ -300,12 +351,12 @@ impl Monsters {
                     m.vel += (want - m.vel) * 0.08;
                 }
                 Kind::Archer => {
-                    // 保持 120~240 距离，冷却好就射
+                    // 保持 120~240 距离，冷却好就射（走位沿 A* 路径）
                     m.vel.y += 900.0 / 60.0;
                     let dir = match m.state {
                         AiState::Chase => {
                             if dist > 240.0 {
-                                to_p.x.signum()
+                                m.nav_dir().unwrap_or(to_p.x.signum())
                             } else if dist < 120.0 {
                                 -to_p.x.signum()
                             } else {
@@ -328,6 +379,29 @@ impl Monsters {
                             color: [0.85, 0.8, 0.6],
                         });
                     }
+                }
+                Kind::Zombie | Kind::Hound => {
+                    // 步行追击（A* 导航），撞墙由通用跳障处理；僵尸慢速高血 / 地狱犬快速低血
+                    m.vel.y += 900.0 / 60.0;
+                    let grounded =
+                        world.solid_px(m.pos.x as i32, (m.pos.y + 1.0) as i32) && m.vel.y >= 0.0;
+                    if grounded {
+                        m.vel.y = 0.0;
+                    }
+                    let dir = match m.state {
+                        AiState::Chase => m.nav_dir().unwrap_or(to_p.x.signum()),
+                        AiState::Flee => -to_p.x.signum(),
+                        AiState::Patrol => {
+                            if m.state_t <= 0.0 {
+                                m.state_t = rng.range_f32(1.0, 2.5);
+                                m.face = if rng.chance(0.5) { 1.0 } else { -1.0 };
+                            }
+                            m.state_t -= 1.0 / 60.0;
+                            m.face
+                        }
+                    };
+                    m.face = dir;
+                    m.vel.x = dir * spd * 0.9;
                 }
                 Kind::Boss => {
                     // ---- 多阶段：P1 撞击 / P2 弹幕+撞击 / P3 狂暴 ----
@@ -536,6 +610,8 @@ impl Monsters {
                 Kind::Slime => [0.45, 0.85, 0.4, 1.0],
                 Kind::Bat => [0.35, 0.3, 0.38, 1.0],
                 Kind::Archer => [0.85, 0.85, 0.9, 1.0],
+                Kind::Zombie => [0.35, 0.6, 0.3, 1.0],
+                Kind::Hound => [0.62, 0.32, 0.18, 1.0],
                 Kind::Boss => [0.75, 0.2, 0.2, 1.0],
             };
             if let Some(e) = m.elite {

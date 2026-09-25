@@ -1,7 +1,10 @@
 //! 游戏内容层入口：组装世界、玩家、动作、工具、实体（地形即像素，Noita 式）
 mod actions;
+mod anim;
 mod art;
+mod astar;
 mod audio;
+mod debug;
 mod drops;
 mod editor;
 mod entities;
@@ -17,6 +20,7 @@ mod tools;
 mod vfx;
 
 use actions::{ActionState, ActionTable};
+use egui::{Align2, Area, Frame as EguiFrame, Id};
 use glam::Vec2;
 use mge_core::math::Aabb;
 use mge_core::rng::Rng;
@@ -42,7 +46,7 @@ pub struct GameApp {
     pub regions: HashMap<String, Region>,
     pub mouse_world: Vec2,
     pub rng: Rng,
-    pub debug: bool,
+    pub dbg: debug::DebugUi,
     pub selftest: bool,
     pub tick_ms_sum: f32,
     pub tick_count: u64,
@@ -56,12 +60,20 @@ pub struct GameApp {
     pub drops: drops::Drops,
     pub monsters: monsters::Monsters,
     pub npcs: npc::Npcs,
+    pub anims: anim::AnimBank,
+    /// 动画预览播放器（编辑器 ▶ 触发，玩家头顶播放）
+    pub anim_preview: Option<anim::AnimPlayer>,
+    /// 最近一次动画帧事件（自测/调试观察）
+    pub anim_last_event: Option<String>,
+    /// 新手引导剩余显示时间（秒）
+    pub guide_t: f32,
     pub audio: audio::Audio,
 }
 
 impl GameApp {
     pub fn new(seed: u64, selftest: bool) -> Self {
         let world = World::new(seed, WORLD_W_PX, WORLD_H_PX);
+        tracing::info!("new: world ok");
         let spawn =
             Vec2::new(world.spawn_x as f32 + 0.5, world.spawn_y as f32);
         let player = Player::new(spawn);
@@ -71,6 +83,14 @@ impl GameApp {
         projectiles.fx_explosion = weapons.explosion.clone();
         projectiles.fx_arrow_hit = weapons.arrow_hit.clone();
         projectiles.fx_hit_spark = weapons.hit_spark.clone();
+        let vfx = vfx::Vfx::embedded();
+        tracing::info!("new: vfx ok");
+        let db = items::ItemDb::embedded();
+        tracing::info!("new: db ok");
+        let anims = anim::AnimBank::load();
+        tracing::info!("new: anims ok");
+        let audio = audio::Audio::new();
+        tracing::info!("new: audio ok");
         Self {
             world,
             player,
@@ -81,21 +101,25 @@ impl GameApp {
             regions: HashMap::new(),
             mouse_world: spawn,
             rng: Rng::new(seed ^ 0xABCD),
-            debug: false,
+            dbg: debug::DebugUi::default(),
             selftest,
             tick_ms_sum: 0.0,
             tick_count: 0,
-            vfx: vfx::Vfx::embedded(),
+            vfx,
             projectiles,
             hitstop: 0,
             weapons,
             editor: editor::VfxEditor::default(),
-            db: items::ItemDb::embedded(),
+            db,
             inv: inventory::Inventory::new(),
             drops: drops::Drops::default(),
             monsters: monsters::Monsters::default(),
             npcs: npc::Npcs::default(),
-            audio: audio::Audio::new(),
+            anims,
+            anim_preview: None,
+            anim_last_event: None,
+            guide_t: 8.0,
+            audio,
         }
     }
 
@@ -112,8 +136,8 @@ impl GameApp {
 
 impl App for GameApp {
     fn init(&mut self, ctx: &mut EngineCtx) {
-        // 程序化美术 + 图集上传
-        let art = art::build(ctx.renderer);
+        // 程序化美术 + 图集上传（含动画帧打包）
+        let art = art::build(ctx.renderer, &mut self.anims);
         self.regions = art.regions;
         // 调色板 + 世界/光照纹理
         let pal = art::palette(&self.world.mats);
@@ -155,6 +179,9 @@ impl App for GameApp {
 
     fn tick(&mut self, ctx: &mut EngineCtx) {
         let t0 = std::time::Instant::now();
+
+        // 新手引导倒计时
+        self.guide_t = (self.guide_t - 1.0 / 60.0).max(0.0);
 
         // ---- 自测脚本（必须在输入消费之前注入）----
         if self.selftest {
@@ -211,6 +238,50 @@ impl App for GameApp {
             ctx.renderer.set_palette(&pal);
         }
         let fx = self.weapons.clone();
+
+        // ---- WGSL 着色器热重载 ----
+        if !self.editor.shader_req.is_empty() {
+            for (kind, src) in self.editor.shader_req.drain(..) {
+                match ctx.renderer.reload_shader(kind, &src) {
+                    Ok(_) => tracing::info!("着色器热重载成功: {kind:?}"),
+                    Err(e) => tracing::error!("着色器热重载失败: {kind:?} {e}"),
+                }
+            }
+        }
+
+        // ---- 动画编辑器：加载/重切精灵表（需要 renderer 上传图集）----
+        if self.editor.anim_load_req {
+            self.editor.anim_load_req = false;
+            self.editor.anim_err = None;
+            if let Some(def) = self.anims.defs.get(&self.editor.anim_sel).cloned() {
+                match anim::load_sheet_frames(&def) {
+                    Ok(frames) => {
+                        let n = frames.len();
+                        if let Some(d) = self.anims.defs.get_mut(&self.editor.anim_sel) {
+                            d.frame_times = vec![0.12; n];
+                        }
+                        match self
+                            .anims
+                            .register_runtime(def, &frames, ctx.renderer)
+                        {
+                            Ok(_) => {
+                                tracing::info!("动画 {} 加载完成（{n} 帧）", self.editor.anim_sel)
+                            }
+                            Err(e) => self.editor.anim_err = Some(e),
+                        }
+                    }
+                    Err(e) => self.editor.anim_err = Some(e),
+                }
+            }
+        }
+
+        // ---- 动画预览（玩家头顶循环播放，帧事件输出日志）----
+        if let Some(pl) = &mut self.anim_preview {
+            for ev in pl.update(&self.anims, 1.0 / 60.0) {
+                tracing::info!("动画事件: {ev} @ 帧 {}", pl.frame);
+                self.anim_last_event = Some(ev);
+            }
+        }
 
         // ---- 暗黑层：聚合属性 / 药水 / 背包 / max_hp / 移速 ----
         let st = self.inv.aggregate(&self.db);
@@ -508,6 +579,9 @@ impl App for GameApp {
         let night = self.world.time > 0.58 && self.world.time < 0.95;
         self.npcs.update(&mut self.world, night, &mut self.rng);
 
+        // ---- BGM 昼夜调度 ----
+        self.audio.tick(night);
+
         // ---- VFX 步进 ----
         self.vfx.update(1.0 / 60.0);
 
@@ -569,9 +643,9 @@ impl App for GameApp {
 
         // ---- 调试 ----
         if ctx.input.just_pressed(Action::ToggleDebug) {
-            self.debug = !self.debug;
+            self.dbg.open = !self.dbg.open;
         }
-        if self.debug && self.tick_count % 120 == 0 {
+        if self.dbg.open && self.tick_count % 120 == 0 {
             let total = (self.world.pixels.w / 128) * (self.world.pixels.h / 128);
             tracing::info!(
                 "tick {} | {:.2}ms/tick | active_px {} | asleep chunks {}/{} | sprites {}",
@@ -590,11 +664,35 @@ impl App for GameApp {
     }
 
     fn render(&mut self, ctx: &mut EngineCtx) {
+        self.dbg.frame();
         // ---- 特效编辑器面板（egui，窗口模式）----
         if let Some(egui) = ctx.egui {
             self.monsters.draw_boss_bar(egui);
             editor::draw(self, egui);
             inventory::draw(self, egui);
+            let snap = debug::DbgSnapshot::of(self);
+            self.dbg.draw(&snap, egui);
+        }
+        // ---- 新手引导 ----
+        if self.guide_t > 0.0 && !self.editor.open && !self.inv.ui_open {
+            if let Some(egui) = ctx.egui {
+                Area::new(Id::new("guide"))
+                    .anchor(Align2::CENTER_TOP, [0.0, 36.0])
+                    .show(egui, |ui| {
+                      EguiFrame::group(ui.style()).show(ui, |ui| {
+                        ui.set_min_width(340.0);
+                        ui.vertical_centered(|ui| {
+                            ui.heading("欢迎来到 Molecular!");
+                        });
+                        ui.separator();
+                        ui.label("A/D 移动 · 空格 跳跃(可二段跳) · Shift 疾跑");
+                        ui.label("左键 攻击/挖掘/放置 · 1~8 切换工具");
+                        ui.label("I 背包 · Q 喝药 · F1 编辑器 · F3 调试");
+                        ui.label("F5 存档 · F9 读档 · 晚上有怪物，记得点火把!");
+                        ui.small(format!("({:.0}s 后收起)", self.guide_t));
+                    });
+                });
+            }
         }
         ctx.sky_color = self.world.sky_color();
         ctx.ambient = self.world.ambient();
@@ -649,6 +747,22 @@ impl App for GameApp {
         self.monsters.render(batch, white, tl, Vec2::new(tl.x + vw, tl.y + vh));
         npc::render(&self.npcs.list, batch, white, tl, Vec2::new(tl.x + vw, tl.y + vh));
 
+        // ---- F3 调试叠加（chunk 休眠态 / 碰撞框）----
+        let (sc, sh) = (self.dbg.show_chunks, self.dbg.show_hitboxes);
+        debug::DebugUi::draw_overlays(self, batch, *white, tl, Vec2::new(tl.x + vw, tl.y + vh), sc, sh);
+
+        // ---- 动画预览（玩家头顶）----
+        if let Some(pl) = &self.anim_preview {
+            if let Some(r) = pl.region(&self.anims) {
+                batch.push_at(
+                    self.player.pos + Vec2::new(0.0, -42.0),
+                    Vec2::new(r.size[0], r.size[1]),
+                    &r,
+                    [1.0; 4],
+                );
+            }
+        }
+
         // ---- 像素世界四边形（地形 + 动态像素同源渲染）----
         let world_w = self.world.pixels.w as f32;
         let world_h = self.world.pixels.h as f32;
@@ -674,7 +788,7 @@ fn main() {
     if args.iter().any(|a| a == "--selftest") {
         tracing::info!("selftest mode");
         let mut app = GameApp::new(2026_0924, true);
-                engine.run_headless(&mut app, 1180);
+        engine.run_headless(&mut app, 1250);
         tracing::info!("selftest done");
     } else {
         let seed = std::time::SystemTime::now()

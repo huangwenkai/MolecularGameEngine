@@ -34,6 +34,8 @@ pub struct EngineCtx<'a> {
     pub headless: bool,
     pub sky_color: [f32; 3],
     pub ambient: f32,
+    /// Bloom 辉光强度（0 关闭，默认 0.45）
+    pub bloom: f32,
     /// 窗口模式下的 egui 上下文（App::render 中构建 UI 面板；无头模式为 None）
     pub egui: Option<&'a egui::Context>,
     screenshot_req: Option<String>,
@@ -106,6 +108,7 @@ impl Engine {
             headless: self.headless,
             sky_color: [0.5, 0.7, 0.9],
             ambient: 1.0,
+            bloom: 0.45,
             egui: None,
             screenshot_req: None,
         }
@@ -188,7 +191,7 @@ impl Engine {
         let mut ctx = self.ctx();
         ctx.egui = ectx.as_ref().map(|c| c as &egui::Context);
         app.render(&mut ctx);
-        let (sky, amb) = (ctx.sky_color, ctx.ambient);
+        let (sky, amb, ctx_bloom) = (ctx.sky_color, ctx.ambient, ctx.bloom);
         drop(ctx);
 
         // ---- egui：结束 pass → UI 网格 ----
@@ -215,7 +218,12 @@ impl Engine {
             };
             let img = renderer.draw_frame(
                 &st.texture,
-                FrameParams { camera: &self.camera, sky_color: sky, ambient: amb },
+                FrameParams {
+                    camera: &self.camera,
+                    sky_color: sky,
+                    ambient: amb,
+                    bloom: ctx_bloom,
+                },
                 &self.atlas_batch.verts,
                 &self.world_batch.verts,
                 false,
@@ -257,7 +265,12 @@ impl Engine {
             let tex = self.offscreen.as_ref().unwrap();
             let img = renderer.draw_frame(
                 tex,
-                FrameParams { camera: &self.camera, sky_color: sky, ambient: amb },
+                FrameParams {
+                    camera: &self.camera,
+                    sky_color: sky,
+                    ambient: amb,
+                    bloom: ctx_bloom,
+                },
                 &self.atlas_batch.verts,
                 &self.world_batch.verts,
                 shot_path.is_some(),
@@ -305,9 +318,12 @@ impl Engine {
     /// 无头模式：跑固定 tick 数后退出（自测/自动化验收）
     pub fn run_headless<A: App>(&mut self, app: &mut A, frames: u64) {
         self.headless = true;
+        tracing::info!("headless: creating instance");
         let instance = gpu::create_instance();
         let (gpu, _) = gpu::create_device(&instance, None);
+        tracing::info!("headless: creating renderer");
         let renderer = Renderer::new(gpu);
+        tracing::info!("headless: renderer ready");
         self.camera
             .set_viewport(self.size.0 as f32 / self.camera.zoom, self.size.1 as f32 / self.camera.zoom);
         self.renderer = Some(renderer);
@@ -315,6 +331,7 @@ impl Engine {
             let mut ctx = self.ctx();
             app.init(&mut ctx);
         }
+        tracing::info!("headless: init done, ticking");
         for _ in 0..frames {
             self.frame += 1;
             let mut ctx = self.ctx();

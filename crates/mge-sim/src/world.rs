@@ -139,6 +139,16 @@ impl PixelWorld {
         &mut self.rng
     }
 
+    /// chunk 网格尺寸（列, 行）——调试可视化用
+    pub fn chunk_grid(&self) -> (i32, i32) {
+        (self.cw, self.ch)
+    }
+
+    /// 某chunk是否休眠（调试可视化用）
+    pub fn chunk_asleep(&self, cx: i32, cy: i32) -> bool {
+        self.chunks[(cy.clamp(0, self.ch - 1) * self.cw + cx.clamp(0, self.cw - 1)) as usize].asleep
+    }
+
     #[inline]
     fn chunk_index(&self, x: i32, y: i32) -> usize {
         let cx = (x / CHUNK_PX as i32).clamp(0, self.cw - 1);

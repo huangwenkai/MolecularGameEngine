@@ -8,10 +8,20 @@ use wgpu;
 #[allow(dead_code)]
 const ATLAS_SIZE: u32 = 2048;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShaderKind {
+    Sprite,
+    Pixels,
+    Composite,
+    Bloom,
+}
+
 pub struct FrameParams<'a> {
     pub camera: &'a Camera,
     pub sky_color: [f32; 3],
     pub ambient: f32,
+    /// Bloom 强度（0 = 关闭）
+    pub bloom: f32,
 }
 
 pub struct Renderer {
@@ -22,6 +32,8 @@ pub struct Renderer {
     sprite_pipe: wgpu::RenderPipeline,
     pixels_pipe: wgpu::RenderPipeline,
     composite_pipe: wgpu::RenderPipeline,
+    bloom_bright_pipe: wgpu::RenderPipeline,
+    bloom_blur_pipe: wgpu::RenderPipeline,
     egui: Option<crate::egui::EguiRenderer>,
 
     camera_buf: wgpu::Buffer,
@@ -37,6 +49,16 @@ pub struct Renderer {
     vbuf_verts: usize,
 
     atlas: Option<wgpu::TextureView>,
+    atlas_tex: Option<wgpu::Texture>,
+    atlas_size: u32,
+    /// 图集货架分配游标（x, y, row_h）——运行时新增贴图（动画帧）用
+    atlas_cursor: (u32, u32, u32),
+    /// Bloom 中间纹理（1/4 分辨率，双缓冲 ping-pong）
+    bloom_a: Option<wgpu::TextureView>,
+    bloom_b: Option<wgpu::TextureView>,
+    bloom_size: (u32, u32),
+    bloom_ubo: Vec<wgpu::Buffer>, // [bright, blur_h, blur_v]
+    bloom_bg_layout: wgpu::BindGroupLayout,
     world: Option<(wgpu::Texture, wgpu::TextureView, u32, u32)>,
     palette: Option<wgpu::TextureView>,
     light: Option<(wgpu::Texture, wgpu::TextureView, u32, u32)>,
@@ -66,6 +88,12 @@ impl Renderer {
             label: Some("composite.wgsl"),
             source: wgpu::ShaderSource::Wgsl(include_str!(
                 "../../../assets/shaders/composite.wgsl"
+            ).into()),
+        });
+        let bloom_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("bloom.wgsl"),
+            source: wgpu::ShaderSource::Wgsl(include_str!(
+                "../../../assets/shaders/bloom.wgsl"
             ).into()),
         });
 
@@ -202,8 +230,68 @@ impl Renderer {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
+                // bloom 纹理 + 采样
+                wgpu::BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 6,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
             ],
         });
+
+        // ---- Bloom 管线资源 ----
+        let bloom_bg_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("bloom-bgl"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(16),
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+        let bloom_ubo = (0..3)
+            .map(|_| {
+                device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("bloom-ubo"),
+                    size: 16,
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                })
+            })
+            .collect::<Vec<_>>();
 
         let comp_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("composite-ubo"),
@@ -219,16 +307,6 @@ impl Renderer {
             mapped_at_creation: false,
         });
 
-        let vlayout = wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<SpriteVertex>() as u64,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &[
-                wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x2, offset: 0, shader_location: 0 },
-                wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x2, offset: 8, shader_location: 1 },
-                wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x4, offset: 16, shader_location: 2 },
-            ],
-        };
-
         let blend = wgpu::BlendState::ALPHA_BLENDING;
         let targets = [Some(wgpu::ColorTargetState {
             format,
@@ -236,54 +314,37 @@ impl Renderer {
             write_mask: wgpu::ColorWrites::ALL,
         })];
 
-        let make_pipe = |shader: &wgpu::ShaderModule,
-                         bglayouts: &[&wgpu::BindGroupLayout],
-                         targets: &[Option<wgpu::ColorTargetState>],
-                         buffers: &[wgpu::VertexBufferLayout]| {
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: None,
-                layout: Some(&device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                    label: None,
-                    bind_group_layouts: bglayouts,
-                    push_constant_ranges: &[],
-                })),
-                vertex: wgpu::VertexState {
-                    module: shader,
-                    entry_point: Some("vs_main"),
-                    compilation_options: Default::default(),
-                    buffers,
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: shader,
-                    entry_point: Some("fs_main"),
-                    compilation_options: Default::default(),
-                    targets,
-                }),
-                primitive: wgpu::PrimitiveState::default(),
-                depth_stencil: None,
-                multisample: wgpu::MultisampleState::default(),
-                multiview: None,
-                cache: None,
-            })
-        };
-
-        let sprite_pipe = make_pipe(
+        let sprite_pipe = Self::make_pipe(
+            &device,
             &sprite_shader,
             &[&camera_bg_layout, &tex_bg_layout],
             &targets,
-            &[vlayout.clone()],
+            &[Self::sprite_vlayout()],
         );
-        let pixels_pipe = make_pipe(
+        let pixels_pipe = Self::make_pipe(
+            &device,
             &pixels_shader,
             &[&camera_bg_layout, &pixels_bg_layout],
             &targets,
-            &[vlayout],
+            &[Self::sprite_vlayout()],
         );
-        let composite_pipe = make_pipe(
-            &composite_shader,
-            &[&composite_bg_layout],
+        let composite_pipe = Self::make_pipe(&device, &composite_shader, &[&composite_bg_layout], &targets, &[]);
+        // Bloom：亮部提取与模糊（h/v 共用模糊管线，方向由各自 ubo 提供）
+        let bloom_bright_pipe = Self::make_pipe_entry(
+            &device,
+            &bloom_shader,
+            &[&bloom_bg_layout],
             &targets,
             &[],
+            Some("fs_bright"),
+        );
+        let bloom_blur_pipe = Self::make_pipe_entry(
+            &device,
+            &bloom_shader,
+            &[&bloom_bg_layout],
+            &targets,
+            &[],
+            Some("fs_blur"),
         );
 
         let samp_nearest = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -309,6 +370,8 @@ impl Renderer {
             sprite_pipe,
             pixels_pipe,
             composite_pipe,
+            bloom_bright_pipe,
+            bloom_blur_pipe,
             egui: Some(egui),
             camera_buf,
             camera_bg,
@@ -320,6 +383,14 @@ impl Renderer {
             vbuf,
             vbuf_verts: 0,
             atlas: None,
+            atlas_tex: None,
+            atlas_size: 0,
+            atlas_cursor: (1, 1, 0),
+            bloom_a: None,
+            bloom_b: None,
+            bloom_size: (0, 0),
+            bloom_ubo,
+            bloom_bg_layout,
             world: None,
             palette: None,
             light: None,
@@ -330,9 +401,157 @@ impl Renderer {
         }
     }
 
+    fn sprite_vlayout() -> wgpu::VertexBufferLayout<'static> {
+        wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<SpriteVertex>() as u64,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &[
+                wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x2, offset: 0, shader_location: 0 },
+                wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x2, offset: 8, shader_location: 1 },
+                wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x4, offset: 16, shader_location: 2 },
+            ],
+        }
+    }
+
+    fn make_pipe(
+        device: &wgpu::Device,
+        shader: &wgpu::ShaderModule,
+        bglayouts: &[&wgpu::BindGroupLayout],
+        targets: &[Option<wgpu::ColorTargetState>],
+        buffers: &[wgpu::VertexBufferLayout],
+    ) -> wgpu::RenderPipeline {
+        Self::make_pipe_entry(device, shader, bglayouts, targets, buffers, None)
+    }
+
+    fn make_pipe_entry(
+        device: &wgpu::Device,
+        shader: &wgpu::ShaderModule,
+        bglayouts: &[&wgpu::BindGroupLayout],
+        targets: &[Option<wgpu::ColorTargetState>],
+        buffers: &[wgpu::VertexBufferLayout],
+        fs_entry: Option<&str>,
+    ) -> wgpu::RenderPipeline {
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: None,
+            layout: Some(&device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: None,
+                bind_group_layouts: bglayouts,
+                push_constant_ranges: &[],
+            })),
+            vertex: wgpu::VertexState {
+                module: shader,
+                entry_point: Some("vs_main"),
+                compilation_options: Default::default(),
+                buffers,
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: shader,
+                entry_point: Some(fs_entry.unwrap_or("fs_main")),
+                compilation_options: Default::default(),
+                targets,
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        })
+    }
+
+    /// Bloom 中间纹理（1/4 分辨率，随场景尺寸重建）
+    fn ensure_bloom(&mut self, w: u32, h: u32) {
+        let matches =
+            self.bloom_size == (w.max(1), h.max(1)) && self.bloom_a.is_some();
+        if matches {
+            return;
+        }
+        let make = |label: &str| {
+            let tex = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some(label),
+                size: wgpu::Extent3d { width: w.max(1), height: h.max(1), depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: self.format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
+            tex.create_view(&Default::default())
+        };
+        self.bloom_a = Some(make("bloom-a"));
+        self.bloom_b = Some(make("bloom-b"));
+        self.bloom_size = (w.max(1), h.max(1));
+    }
+
+    /// 着色器热重载：naga 预校验通过后重建对应管线
+    pub fn reload_shader(&mut self, kind: ShaderKind, source: &str) -> Result<(), String> {
+        // 预校验（语法 + 语义），失败时保留旧管线
+        let module = naga::front::wgsl::parse_str(source).map_err(|e| format!("解析失败: {e}"))?;
+        let mut validator =
+            naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all());
+        validator.validate(&module).map_err(|e| format!("校验失败: {e}"))?;
+
+        let sm = self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("hot-reload"),
+            source: wgpu::ShaderSource::Wgsl(source.into()),
+        });
+        let targets = [Some(wgpu::ColorTargetState {
+            format: self.format,
+            blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+            write_mask: wgpu::ColorWrites::ALL,
+        })];
+        match kind {
+            ShaderKind::Sprite => {
+                self.sprite_pipe = Self::make_pipe(
+                    &self.device,
+                    &sm,
+                    &[&self.camera_bg_layout, &self.tex_bg_layout],
+                    &targets,
+                    &[Self::sprite_vlayout()],
+                );
+            }
+            ShaderKind::Pixels => {
+                self.pixels_pipe = Self::make_pipe(
+                    &self.device,
+                    &sm,
+                    &[&self.camera_bg_layout, &self.pixels_bg_layout],
+                    &targets,
+                    &[Self::sprite_vlayout()],
+                );
+            }
+            ShaderKind::Composite => {
+                self.composite_pipe =
+                    Self::make_pipe(&self.device, &sm, &[&self.composite_bg_layout], &targets, &[]);
+            }
+            ShaderKind::Bloom => {
+                self.bloom_bright_pipe = Self::make_pipe_entry(
+                    &self.device,
+                    &sm,
+                    &[&self.bloom_bg_layout],
+                    &targets,
+                    &[],
+                    Some("fs_bright"),
+                );
+                self.bloom_blur_pipe = Self::make_pipe_entry(
+                    &self.device,
+                    &sm,
+                    &[&self.bloom_bg_layout],
+                    &targets,
+                    &[],
+                    Some("fs_blur"),
+                );
+            }
+        }
+        Ok(())
+    }
+
     /// 由图集构建器创建图集纹理
     pub fn set_atlas(&mut self, builder: AtlasBuilder) -> std::collections::HashMap<String, crate::atlas::Region> {
+        // 记录分配游标，供运行时追加贴图（动画帧等）
+        let ((cx, cy), row_h) = builder.cursor();
+        self.atlas_cursor = (cx, cy, row_h);
         let (data, size, entries) = builder.flatten();
+        self.atlas_size = size;
         let tex = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("atlas"),
             size: wgpu::Extent3d { width: size, height: size, depth_or_array_layers: 1 },
@@ -360,7 +579,52 @@ impl Renderer {
         );
         let view = tex.create_view(&Default::default());
         self.atlas = Some(view);
+        self.atlas_tex = Some(tex);
         entries
+    }
+
+    /// 图集尺寸（动画帧区域 uv 计算用）
+    pub fn atlas_size(&self) -> u32 {
+        self.atlas_size
+    }
+
+    /// 图集货架式分配一块空闲区域（与 AtlasBuilder 同款游标逻辑）
+    pub fn atlas_alloc(&mut self, w: u32, h: u32) -> Option<(u32, u32)> {
+        if self.atlas_size == 0 {
+            return None;
+        }
+        let size = self.atlas_size;
+        let (cx, cy, row_h) = self.atlas_cursor;
+        let (nx, ny, nrh) = if cx + w + 1 > size {
+            (1, cy + row_h, h + 1)
+        } else {
+            (cx, cy, row_h.max(h + 1))
+        };
+        if nx + w > size || ny + h > size {
+            return None; // 图集已满
+        }
+        self.atlas_cursor = (nx + w + 1, ny, nrh);
+        Some((nx, ny))
+    }
+
+    /// 向图集写入一块 RGBA 数据（运行时新增动画帧等）
+    pub fn upload_atlas(&mut self, x: u32, y: u32, w: u32, h: u32, data: &[u8]) {
+        let Some(tex) = self.atlas_tex.clone() else { return };
+        self.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &tex,
+                mip_level: 0,
+                origin: wgpu::Origin3d { x, y, z: 0 },
+                aspect: wgpu::TextureAspect::All,
+            },
+            data,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(w * 4),
+                rows_per_image: None,
+            },
+            wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+        );
     }
 
     /// 像素世界纹理（RG8：材质 + 明度）
@@ -522,9 +786,21 @@ impl Renderer {
             0.0,
             0.0,
             0.0,
-            0.0,
+            p.bloom,
         ];
         self.queue.write_buffer(&self.comp_buf, 0, bytemuck::cast_slice(&comp));
+
+        // ---- Bloom 中间资源与 uniform ----
+        self.ensure_bloom(tw / 4, th / 4);
+        let (bw, bh) = self.bloom_size;
+        let ubos: [[f32; 4]; 3] = [
+            [1.0 / tw.max(1) as f32, 1.0 / th.max(1) as f32, 0.0, 0.0], // bright（dir 无效）
+            [1.0 / bw as f32, 1.0 / bh as f32, 1.0, 0.0],               // blur 水平
+            [1.0 / bw as f32, 1.0 / bh as f32, 0.0, 1.0],               // blur 垂直
+        ];
+        for (i, u) in ubos.iter().enumerate() {
+            self.queue.write_buffer(&self.bloom_ubo[i], 0, bytemuck::cast_slice(u));
+        }
 
         // ---- 顶点缓冲 ----
         let total = atlas_verts.len() + world_verts.len();
@@ -572,19 +848,45 @@ impl Renderer {
             })
         });
         let scene_view = self.scene.as_ref().unwrap().1.clone();
+        let bloom_a_view = self.bloom_a.clone();
+        let bloom_b_view = self.bloom_b.clone();
         let light_bg = self.light.as_ref().map(|(_, lv, _, _)| {
+            let mut entries = vec![
+                wgpu::BindGroupEntry { binding: 0, resource: self.comp_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&scene_view) },
+                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&self.samp_linear) },
+                wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(lv) },
+                wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::Sampler(&self.samp_linear) },
+            ];
+            if let Some(ba) = &bloom_a_view {
+                entries.push(wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::TextureView(ba) });
+                entries.push(wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::Sampler(&self.samp_linear) });
+            }
             self.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("composite-bg"),
                 layout: &self.composite_bg_layout,
-                entries: &[
-                    wgpu::BindGroupEntry { binding: 0, resource: self.comp_buf.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&scene_view) },
-                    wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&self.samp_linear) },
-                    wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(lv) },
-                    wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::Sampler(&self.samp_linear) },
-                ],
+                entries: &entries,
             })
         });
+        // Bloom 各 pass 的 bind group：bright ← scene，blurH ← A，blurV ← B
+        let mk_bloom_bg = |tex: &wgpu::TextureView, ubo: &wgpu::Buffer| {
+            self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("bloom-bg"),
+                layout: &self.bloom_bg_layout,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: ubo.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(tex) },
+                    wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&self.samp_linear) },
+                ],
+            })
+        };
+        let bloom_bg_bright = mk_bloom_bg(&scene_view, &self.bloom_ubo[0]);
+        let bloom_bg_h = bloom_a_view
+            .as_ref()
+            .map(|a| mk_bloom_bg(a, &self.bloom_ubo[1]));
+        let bloom_bg_v = bloom_b_view
+            .as_ref()
+            .map(|b| mk_bloom_bg(b, &self.bloom_ubo[2]));
 
         // ---- 编码 ----
         let mut enc = self
@@ -627,6 +929,70 @@ impl Renderer {
                     atlas_verts.len() as u32..(atlas_verts.len() + world_verts.len()) as u32,
                     0..1,
                 );
+            }
+        }
+        // ---- Bloom：亮部提取 → 高斯模糊（水平/垂直）→ 结果写入 bloom_a ----
+        if p.bloom > 0.0 {
+            if let (Some(ba), Some(bb), Some(bgh), Some(bgv)) =
+                (&bloom_a_view, &bloom_b_view, &bloom_bg_h, &bloom_bg_v)
+            {
+                {
+                    let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("bloom-bright"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: ba,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                                store: wgpu::StoreOp::Store,
+                            },
+                        })],
+                        depth_stencil_attachment: None,
+                        timestamp_writes: None,
+                        occlusion_query_set: None,
+                    });
+                    pass.set_pipeline(&self.bloom_bright_pipe);
+                    pass.set_bind_group(0, &bloom_bg_bright, &[]);
+                    pass.draw(0..3, 0..1);
+                }
+                {
+                    let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("bloom-blur-h"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: bb,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                                store: wgpu::StoreOp::Store,
+                            },
+                        })],
+                        depth_stencil_attachment: None,
+                        timestamp_writes: None,
+                        occlusion_query_set: None,
+                    });
+                    pass.set_pipeline(&self.bloom_blur_pipe);
+                    pass.set_bind_group(0, bgh, &[]);
+                    pass.draw(0..3, 0..1);
+                }
+                {
+                    let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("bloom-blur-v"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: ba,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                                store: wgpu::StoreOp::Store,
+                            },
+                        })],
+                        depth_stencil_attachment: None,
+                        timestamp_writes: None,
+                        occlusion_query_set: None,
+                    });
+                    pass.set_pipeline(&self.bloom_blur_pipe);
+                    pass.set_bind_group(0, bgv, &[]);
+                    pass.draw(0..3, 0..1);
+                }
             }
         }
         {

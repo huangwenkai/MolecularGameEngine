@@ -7,8 +7,8 @@ pub struct Art {
     pub regions: std::collections::HashMap<String, mge_render::Region>,
 }
 
-/// 生成全部贴图并构建图集
-pub fn build(ctx_renderer: &mut mge_render::renderer::Renderer) -> Art {
+/// 生成全部贴图并构建图集（动画帧一并打包）
+pub fn build(ctx_renderer: &mut mge_render::renderer::Renderer, anims: &mut crate::anim::AnimBank) -> Art {
     let mut b = AtlasBuilder::new(1024);
 
     // 基础白色块（角色/部件/放置预览染色用）
@@ -77,6 +77,9 @@ pub fn build(ctx_renderer: &mut mge_render::renderer::Renderer) -> Art {
         dummy.put_pixel(x, 19, Rgba([120, 88, 48, 255]));
     }
     b.add("dummy", &dummy);
+
+    // 序列帧动画帧打包（数据驱动：assets/anims/*.png + animations.ron）
+    anims.pack(&mut b);
 
     let regions = ctx_renderer.set_atlas(b);
     Art { regions }

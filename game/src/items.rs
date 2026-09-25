@@ -121,6 +121,12 @@ pub struct ItemDef {
     pub lvl: u8,
     #[serde(default)]
     pub value: u32,
+    /// 暴击率加成（%）
+    #[serde(default)]
+    pub crit: f32,
+    /// 暴击伤害加成（%）
+    #[serde(default)]
+    pub crit_dmg: f32,
 }
 
 fn def_stack() -> u16 {
@@ -345,6 +351,8 @@ impl ItemDb {
         st.armor += d.armor;
         st.hp += d.hp;
         st.atk_mult *= d.speed;
+        st.crit += d.crit;
+        st.crit_dmg += d.crit_dmg;
         for a in &item.affixes {
             let Some(ad) = self.affixes.iter().find(|x| x.id == a.id) else { continue };
             match ad.stat {

@@ -1321,6 +1321,7 @@ dependencies = [
  "glam 0.29.3",
  "image",
  "mge-core",
+ "naga",
  "pollster",
  "wgpu",
 ]

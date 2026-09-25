@@ -63,6 +63,11 @@ impl AtlasBuilder {
         self.entries.get(name).copied()
     }
 
+    /// 当前分配游标（供 Renderer 延续运行时分配）
+    pub fn cursor(&self) -> ((u32, u32), u32) {
+        (self.cursor, self.row_h)
+    }
+
     /// 打包完成：输出扁平化 RGBA 数据
     pub fn flatten(self) -> (Vec<u8>, u32, HashMap<String, Region>) {
         (self.pixels, self.size, self.entries)

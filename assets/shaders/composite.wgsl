@@ -1,16 +1,18 @@
-// 最终合成：场景 × 光照（天空光×环境系数 / 方块光取最大）+ 夜色偏蓝
+// 最终合成：场景 × 光照（天空光×环境系数 / 方块光取最大）+ 夜色偏蓝 + Bloom 叠加
 struct Params {
     topleft: vec2<f32>,
     viewport: vec2<f32>,
     inv_tiles: vec2<f32>,
     ambient: f32,
-    _pad: vec4<f32>,
+    _pad: vec4<f32>, // _pad.x = bloom 强度
 }
 @group(0) @binding(0) var<uniform> p: Params;
 @group(0) @binding(1) var scene_tex: texture_2d<f32>;
 @group(0) @binding(2) var scene_samp: sampler;
 @group(0) @binding(3) var light_tex: texture_2d<f32>;
 @group(0) @binding(4) var light_samp: sampler;
+@group(0) @binding(5) var bloom_tex: texture_2d<f32>;
+@group(0) @binding(6) var bloom_samp: sampler;
 
 struct VOut {
     @builtin(position) pos: vec4<f32>,
@@ -41,5 +43,7 @@ fn fs_main(in: VOut) -> @location(0) vec4<f32> {
     lum = max(lum, 0.045);
     var col = s.rgb * lum;
     col = mix(col * vec3<f32>(0.72, 0.82, 1.28), col, clamp(p.ambient * 1.5, 0.0, 1.0));
+    // Bloom 辉光叠加（强度可调，0 关闭）
+    col += textureSample(bloom_tex, bloom_samp, in.uv).rgb * p._pad.x;
     return vec4<f32>(col, s.a);
 }

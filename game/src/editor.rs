@@ -10,6 +10,14 @@ use std::collections::HashMap;
 pub const VFX_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/data/vfx.ron");
 pub const WEAPONS_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/data/weapons.ron");
 pub const MATERIALS_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../assets/data/materials.ron");
+pub const SHADERS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../assets/shaders/");
+
+const SHADERS: &[(&str, mge_render::renderer::ShaderKind)] = &[
+    ("sprite.wgsl", mge_render::renderer::ShaderKind::Sprite),
+    ("pixels.wgsl", mge_render::renderer::ShaderKind::Pixels),
+    ("composite.wgsl", mge_render::renderer::ShaderKind::Composite),
+    ("bloom.wgsl", mge_render::renderer::ShaderKind::Bloom),
+];
 
 /// 武器 → 特效蓝图名映射（数据驱动，热重载）
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -51,6 +59,8 @@ impl Default for WeaponFx {
 #[derive(Default)]
 pub struct VfxEditor {
     pub open: bool,
+    /// 当前页：0 特效 / 1 动画
+    pub tab: usize,
     /// 选中蓝图名
     pub sel: String,
     /// 预览触发标记（tick 中消费，因为需要相机等）
@@ -58,6 +68,18 @@ pub struct VfxEditor {
     vfx_mtime: Option<std::time::SystemTime>,
     wpn_mtime: Option<std::time::SystemTime>,
     mat_mtime: Option<std::time::SystemTime>,
+    anims_mtime: Option<std::time::SystemTime>,
+    shader_mtimes: [Option<std::time::SystemTime>; 4],
+    /// 待重载的着色器（tick 中消费：需要 renderer）
+    pub shader_req: Vec<(mge_render::renderer::ShaderKind, String)>,
+    // ---- 动画页 ----
+    /// 选中动画名
+    pub anim_sel: String,
+    /// "加载精灵表"请求（tick 中消费：需要 renderer 上传图集）
+    pub anim_load_req: bool,
+    pub anim_err: Option<String>,
+    /// 统一帧时长（编辑用）
+    pub anim_time: f32,
 }
 
 /// 读取武器映射（文件缺失/损坏时用默认）
@@ -163,17 +185,56 @@ pub fn reload_if_changed(app: &mut GameApp) -> bool {
             app.editor.vfx_mtime = Some(m);
         }
     }
+    // ---- animations.ron：面板打开时跳过（防丢编辑）----
+    if let Ok(m) = mtime(crate::anim::ANIMS_PATH) {
+        let changed = app.editor.anims_mtime.map(|b| b != m).unwrap_or(true);
+        if changed && !app.editor.open {
+            let bank = crate::anim::AnimBank::load();
+            app.anims.defs = bank.defs;
+            tracing::info!("animations.ron 热重载完成（{} 个动画）", app.anims.defs.len());
+            app.editor.anims_mtime = Some(m);
+        } else if app.editor.anims_mtime.is_none() {
+            app.editor.anims_mtime = Some(m);
+        }
+    }
+    // ---- WGSL 着色器热重载（改文件不重启）----
+    for (i, (name, kind)) in SHADERS.iter().enumerate() {
+        let path = format!("{SHADERS_DIR}{name}");
+        if let Ok(m) = mtime(&path) {
+            let changed = app.editor.shader_mtimes[i].map(|b| b != m).unwrap_or(false);
+            if changed {
+                match std::fs::read_to_string(&path) {
+                    Ok(s) => app.editor.shader_req.push((*kind, s)),
+                    Err(e) => tracing::warn!("{name} 读取失败: {e}"),
+                }
+            }
+            app.editor.shader_mtimes[i] = Some(m);
+        }
+    }
     mat_reloaded
 }
 
-/// egui 面板（App::render 中调用）
+/// egui 面板（App::render 中调用）：特效 / 动画 双页
 pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
     if !app.editor.open {
         return;
     }
-    egui::Window::new("特效编辑器 (VFX)")
+    egui::Window::new("编辑器 (F1)")
         .default_width(420.0)
         .show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.selectable_value(&mut app.editor.tab, 0, "特效");
+                ui.selectable_value(&mut app.editor.tab, 1, "动画");
+            });
+            ui.separator();
+            match app.editor.tab {
+                0 => tab_vfx(ui, app),
+                _ => tab_anim(ui, app),
+            }
+        });
+}
+
+fn tab_vfx(ui: &mut egui::Ui, app: &mut GameApp) {
             let mut do_save = false;
             let mut do_save_weapons = false;
 
@@ -305,7 +366,6 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
             if do_save_weapons {
                 save_weapons(app);
             }
-        });
 }
 
 fn emitter_ui(ui: &mut egui::Ui, em: &mut Emitter, idx: usize, del: &mut Option<usize>) {
@@ -363,4 +423,140 @@ fn emitter_ui(ui: &mut egui::Ui, em: &mut Emitter, idx: usize, del: &mut Option<
         ui.color_edit_button_rgb(&mut em.color2);
         ui.checkbox(&mut em.glow, "辉光");
     });
+}
+
+/// 动画编辑页：精灵表加载 / 帧时长 / 帧事件 / 预览 / 保存（全程不重启）
+fn tab_anim(ui: &mut egui::Ui, app: &mut GameApp) {
+    let names: Vec<String> = app.anims.defs.keys().cloned().collect();
+    if app.editor.anim_sel.is_empty() {
+        app.editor.anim_sel = names.first().cloned().unwrap_or_default();
+    }
+    ui.horizontal(|ui| {
+        ui.label("动画");
+        ComboBox::from_id_salt("anim_sel")
+            .selected_text(app.editor.anim_sel.clone())
+            .show_ui(ui, |ui| {
+                for n in &names {
+                    ui.selectable_value(&mut app.editor.anim_sel, n.clone(), n);
+                }
+            });
+        if ui.button("新建").clicked() {
+            let mut i = 1;
+            let name = loop {
+                let n = format!("new_anim_{i}");
+                if !app.anims.defs.contains_key(&n) {
+                    break n;
+                }
+                i += 1;
+            };
+            app.anims.defs.insert(
+                name.clone(),
+                crate::anim::AnimDef {
+                    name: name.clone(),
+                    sheet: String::new(),
+                    frame_w: 16,
+                    frame_h: 16,
+                    frame_times: vec![0.12],
+                    events: vec![],
+                    r#loop: true,
+                },
+            );
+            app.editor.anim_sel = name;
+        }
+        if ui.button("删除").clicked() && app.anims.defs.contains_key(&app.editor.anim_sel) {
+            app.anims.remove(&app.editor.anim_sel);
+            app.anim_preview = None;
+            app.editor.anim_sel.clear();
+        }
+    });
+
+    let Some(def) = app.anims.defs.get_mut(&app.editor.anim_sel.clone()) else {
+        return;
+    };
+    ui.separator();
+    egui::Grid::new("anim_meta")
+        .num_columns(2)
+        .spacing([10.0, 3.0])
+        .show(ui, |ui| {
+            ui.label("精灵表文件");
+            ui.text_edit_singleline(&mut def.sheet);
+            ui.end_row();
+            ui.label("帧尺寸");
+            ui.horizontal(|ui| {
+                ui.add(egui::DragValue::new(&mut def.frame_w).range(1..=256));
+                ui.label("x");
+                ui.add(egui::DragValue::new(&mut def.frame_h).range(1..=256));
+            });
+            ui.end_row();
+            ui.label("循环");
+            ui.checkbox(&mut def.r#loop, "");
+            ui.end_row();
+        });
+    if ui.button("📂 加载/重切精灵表（assets/anims/ 下）").clicked() {
+        app.editor.anim_load_req = true;
+    }
+    if let Some(e) = &app.editor.anim_err {
+        ui.colored_label(egui::Color32::RED, e);
+    }
+
+    // 帧时长
+    ui.separator();
+    ui.horizontal(|ui| {
+        ui.label("统一帧时长");
+        ui.add(
+            egui::DragValue::new(&mut app.editor.anim_time)
+                .speed(0.01)
+                .range(0.016..=2.0)
+                .suffix("s"),
+        );
+        if ui.button("应用到全部帧").clicked() && app.editor.anim_time >= 0.016 {
+            if def.frame_times.is_empty() {
+                def.frame_times.push(app.editor.anim_time);
+            } else {
+                for t in &mut def.frame_times {
+                    *t = app.editor.anim_time;
+                }
+            }
+        }
+    });
+
+    // 帧事件
+    ui.heading("帧事件");
+    let mut del_ev: Option<usize> = None;
+    for (i, (f, e)) in def.events.iter_mut().enumerate() {
+        ui.horizontal(|ui| {
+            ui.label("帧");
+            ui.add(egui::DragValue::new(f).range(0..=255));
+            ui.label("事件");
+            ui.text_edit_singleline(e);
+            if ui.small_button("✕").clicked() {
+                del_ev = Some(i);
+            }
+        });
+    }
+    if let Some(i) = del_ev {
+        def.events.remove(i);
+    }
+    if ui.button("+ 添加事件").clicked() {
+        def.events.push((0, "hit".into()));
+    }
+
+    // 预览 / 保存
+    ui.separator();
+    ui.horizontal(|ui| {
+        let playing = app.anim_preview.is_some();
+        if ui.button(if playing { "⏹ 停止预览" } else { "▶ 预览（玩家头顶）" }).clicked() {
+            app.anim_preview = if playing {
+                None
+            } else {
+                Some(crate::anim::AnimPlayer::new(app.editor.anim_sel.clone()))
+            };
+        }
+        if ui.button("💾 保存 animations.ron").clicked() {
+            if let Err(e) = app.anims.save() {
+                tracing::error!("animations.ron 保存失败: {e}");
+            }
+        }
+    });
+    ui.small("Aseprite：File → Export sprite sheet 导出横向 PNG 放入 assets/anims/；帧事件在预览播放到该帧时输出日志。");
 }

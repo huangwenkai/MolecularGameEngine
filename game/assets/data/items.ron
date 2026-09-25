@@ -2,21 +2,31 @@
 // 注意：RON 定长数组/元组用圆括号；字符串正常。
 (
     items: [
-        // ---- 武器 ----
+        // ---- 武器（10）----
         (id: "sword_rusty",  name: "锈剑",   slot: Weapon, dmg: 8.0,  speed: 1.0,  lvl: 1, value: 5),
+        (id: "sword_bronze", name: "铜剑",   slot: Weapon, dmg: 11.0, speed: 1.0,  lvl: 1, value: 15),
+        (id: "dagger",       name: "匕首",   slot: Weapon, dmg: 6.0,  speed: 1.6,  lvl: 1, value: 12),
         (id: "sword_iron",   name: "铁剑",   slot: Weapon, dmg: 15.0, speed: 1.0,  lvl: 2, value: 30),
+        (id: "spear",        name: "长矛",   slot: Weapon, dmg: 16.0, speed: 0.9,  lvl: 3, value: 55),
+        (id: "sword_steel",  name: "钢剑",   slot: Weapon, dmg: 19.0, speed: 1.05, lvl: 3, value: 60),
         (id: "sword_knight", name: "骑士剑", slot: Weapon, dmg: 24.0, speed: 1.05, lvl: 4, value: 120),
         (id: "axe_battle",   name: "战斧",   slot: Weapon, dmg: 34.0, speed: 0.75, lvl: 5, value: 180),
+        (id: "greatsword",   name: "大剑",   slot: Weapon, dmg: 30.0, speed: 0.8,  lvl: 5, value: 200),
+        (id: "hammer",       name: "战锤",   slot: Weapon, dmg: 40.0, speed: 0.6,  lvl: 6, value: 260),
         // ---- 护甲 ----
         (id: "helm_cloth",  name: "布帽",  slot: Head,  armor: 1.0, lvl: 1, value: 4),
         (id: "helm_iron",   name: "铁盔",  slot: Head,  armor: 4.0, lvl: 3, value: 60),
+        (id: "helm_steel",  name: "钢盔",  slot: Head,  armor: 7.0, hp: 6.0, lvl: 5, value: 130),
         (id: "chest_cloth", name: "布衣",  slot: Chest, armor: 2.0, hp: 5.0,  lvl: 1, value: 6),
         (id: "chest_iron",  name: "铁甲",  slot: Chest, armor: 6.0, hp: 15.0, lvl: 3, value: 90),
+        (id: "chest_steel", name: "钢甲",  slot: Chest, armor: 10.0, hp: 24.0, lvl: 5, value: 180),
         (id: "legs_cloth",  name: "布裤",  slot: Legs,  armor: 1.0, lvl: 1, value: 4),
         (id: "legs_iron",   name: "铁腿甲", slot: Legs, armor: 4.0, lvl: 3, value: 60),
+        (id: "legs_steel",  name: "钢腿甲", slot: Legs, armor: 7.0, hp: 10.0, lvl: 5, value: 130),
         // ---- 饰品 ----
         (id: "amulet_hp",    name: "生命护符", slot: Trinket, hp: 15.0, lvl: 2, value: 50),
         (id: "ring_swift",   name: "疾风戒指", slot: Trinket, speed: 1.08, lvl: 2, value: 50),
+        (id: "ring_crit",    name: "猎手戒指", slot: Trinket, crit: 6.0, crit_dmg: 15.0, lvl: 4, value: 110),
         // ---- 消耗品 / 材料 ----
         (id: "potion_hp", name: "治疗药水", slot: Trinket, stack: 99, hp: 40.0, value: 15),
         (id: "cloth",     name: "布料",     slot: Trinket, stack: 99, value: 2),
@@ -68,5 +78,7 @@
         (out: "potion_hp",   count: 1, cost: [("cloth", 3), ("gel", 2)]),
         (out: "sword_iron",  count: 1, cost: [("gel", 6), ("cloth", 5)]),
         (out: "helm_iron",   count: 1, cost: [("gel", 4), ("cloth", 6)]),
+        (out: "sword_steel", count: 1, cost: [("gel", 12), ("cloth", 10)]),
+        (out: "chest_steel", count: 1, cost: [("gel", 16), ("cloth", 14)]),
     ],
 )

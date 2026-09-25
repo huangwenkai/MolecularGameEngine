@@ -1,0 +1,18 @@
+[
+    (
+        name: "demo_slime",
+        sheet: "demo_slime.png",
+        frame_w: 16,
+        frame_h: 16,
+        frame_times: [
+            0.14,
+            0.1,
+            0.14,
+            0.1,
+        ],
+        events: [
+            (0, "squish"),
+        ],
+        loop: true,
+    ),
+]
