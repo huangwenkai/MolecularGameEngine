@@ -16,6 +16,7 @@ mod player;
 mod projectiles;
 mod save;
 mod selftest;
+mod settings;
 mod tools;
 mod vfx;
 
@@ -68,6 +69,12 @@ pub struct GameApp {
     /// 新手引导剩余显示时间（秒）
     pub guide_t: f32,
     pub audio: audio::Audio,
+    /// 系统设置（音量/震动/键位，持久化于 saves/settings.ron）
+    pub settings: settings::Settings,
+    /// 系统设置面板（ESC）
+    pub settings_ui: settings::SettingsUi,
+    /// egui 中文字体是否已注入
+    fonts_done: bool,
 }
 
 impl GameApp {
@@ -89,8 +96,10 @@ impl GameApp {
         tracing::info!("new: db ok");
         let anims = anim::AnimBank::load();
         tracing::info!("new: anims ok");
-        let audio = audio::Audio::new();
+        let mut audio = audio::Audio::new();
         tracing::info!("new: audio ok");
+        let settings = settings::Settings::load();
+        audio.set_volume(settings.volume);
         Self {
             world,
             player,
@@ -120,6 +129,9 @@ impl GameApp {
             anim_last_event: None,
             guide_t: 8.0,
             audio,
+            settings,
+            settings_ui: settings::SettingsUi::default(),
+            fonts_done: false,
         }
     }
 
@@ -131,6 +143,40 @@ impl GameApp {
             }
         }
         self.world.pixels.h / 2
+    }
+
+    /// 打开设置面板时清掉残留的物理键捕获（避免误触发重绑定）
+    fn settings_ui_listen_reset(&self, ctx: &mut EngineCtx) {
+        let _ = ctx.input.take_raw_key();
+    }
+
+    /// 注入系统中文字体（仅一次；egui 默认字体不含 CJK，中文会显示为方框）
+    fn ensure_cjk_fonts(&mut self, egui: &egui::Context) {
+        if self.fonts_done {
+            return;
+        }
+        self.fonts_done = true;
+        const CANDIDATES: &[&str] = &[
+            "C:/Windows/Fonts/msyh.ttc",
+            "C:/Windows/Fonts/msyh.ttf",
+            "C:/Windows/Fonts/simhei.ttf",
+            "C:/Windows/Fonts/simsun.ttc",
+            "C:/Windows/Fonts/Deng.ttf",
+        ];
+        for path in CANDIDATES {
+            let Ok(bytes) = std::fs::read(path) else { continue };
+            let mut fonts = egui::FontDefinitions::default();
+            fonts
+                .font_data
+                .insert("cjk".into(), egui::FontData::from_owned(bytes).into());
+            for fam in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
+                fonts.families.entry(fam).or_default().push("cjk".into());
+            }
+            egui.set_fonts(fonts);
+            tracing::info!("CJK 字体已加载: {path}");
+            return;
+        }
+        tracing::warn!("未找到系统中文字体，界面中文可能显示为方框");
     }
 }
 
@@ -173,12 +219,30 @@ impl App for GameApp {
         // NPC 生活 AI（地表清理后生成：NPC + 浆果丛）
         self.npcs = npc::Npcs::new(&mut self.world, 2, &mut self.rng);
 
+        // 系统设置：键位覆盖 + 震屏倍率
+        self.settings.apply(ctx.input.map_mut());
+        ctx.camera.shake_scale = self.settings.shake;
+
         ctx.camera.center = self.player.pos - Vec2::new(0.0, 16.0);
         self.mouse_world = ctx.camera.screen_to_world(ctx.input.mouse_pos);
     }
 
     fn tick(&mut self, ctx: &mut EngineCtx) {
         let t0 = std::time::Instant::now();
+
+        // ---- 系统设置（ESC）：打开时暂停游戏，仅面板响应 ----
+        if ctx.input.just_pressed(Action::ToggleMenu) {
+            self.settings_ui.open = !self.settings_ui.open;
+            if self.settings_ui.open {
+                self.settings_ui_listen_reset(ctx);
+            }
+        }
+        ctx.camera.shake_scale = self.settings.shake;
+        if self.settings_ui.open {
+            self.tick_ms_sum += t0.elapsed().as_secs_f32() * 1000.0;
+            self.tick_count += 1;
+            return;
+        }
 
         // 新手引导倒计时
         self.guide_t = (self.guide_t - 1.0 / 60.0).max(0.0);
@@ -664,14 +728,21 @@ impl App for GameApp {
         self.dbg.frame();
         // ---- 特效编辑器面板（egui，窗口模式）----
         if let Some(egui) = ctx.egui {
+            self.ensure_cjk_fonts(egui);
             self.monsters.draw_boss_bar(egui);
             editor::draw(self, egui);
             inventory::draw(self, egui);
             let snap = debug::DbgSnapshot::of(self);
             self.dbg.draw(&snap, egui);
+            self.settings_ui
+                .draw(&mut self.settings, &mut self.audio, ctx.input, egui);
         }
         // ---- 新手引导 ----
-        if self.guide_t > 0.0 && !self.editor.open && !self.inv.ui_open {
+        if self.guide_t > 0.0
+            && !self.editor.open
+            && !self.inv.ui_open
+            && !self.settings_ui.open
+        {
             if let Some(egui) = ctx.egui {
                 Area::new(Id::new("guide"))
                     .anchor(Align2::CENTER_TOP, [0.0, 36.0])
@@ -683,9 +754,9 @@ impl App for GameApp {
                         });
                         ui.separator();
                         ui.label("A/D 移动 · 空格 跳跃(可二段跳) · Shift 疾跑");
-                        ui.label("左键 攻击/挖掘/放置 · 1~8 切换工具");
+                        ui.label("左键单击 攻击/挖掘/放置 · 1~8 切换工具");
                         ui.label("I 背包 · Q 喝药 · F1 编辑器 · F3 调试");
-                        ui.label("F5 存档 · F9 读档 · 晚上有怪物，记得点火把!");
+                        ui.label("ESC 系统设置 · F5 存档 · F9 读档 · 晚上记得点火把!");
                         ui.small(format!("({:.0}s 后收起)", self.guide_t));
                     });
                 });

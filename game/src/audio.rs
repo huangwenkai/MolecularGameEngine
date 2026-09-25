@@ -94,6 +94,10 @@ impl Audio {
 
     pub fn set_volume(&mut self, v: f32) {
         self.volume = v.clamp(0.0, 1.0);
+        // 正在播放的 BGM 实时跟随音量
+        if let Some(h) = &mut self.bgm_handle {
+            let _ = h.set_volume(self.volume * 0.45, kira::Tween::default());
+        }
     }
 
     /// BGM 调度：每 tick 调用；曲子播完或昼夜切换时换曲
@@ -109,10 +113,7 @@ impl Audio {
         }
         let data = if night { &self.bgm_night } else { &self.bgm_day };
         let Some(data) = data else { return };
-        let mut d = data.clone().volume(0.45);
-        if self.volume < 1.0 {
-            d = d.volume(self.volume);
-        }
+        let d = data.clone().volume(0.45 * self.volume);
         if let Ok(h) = m.play(d) {
             self.bgm_handle = Some(h);
             self.bgm_is_night = night;

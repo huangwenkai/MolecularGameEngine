@@ -3,7 +3,7 @@ pub use crate::action::Action;
 use crate::action::{ActionMap};
 use glam::Vec2;
 use winit::event::{ElementState, MouseButton};
-use winit::keyboard::PhysicalKey;
+use winit::keyboard::{KeyCode, PhysicalKey};
 
 #[derive(Default)]
 pub struct InputState {
@@ -15,6 +15,8 @@ pub struct InputState {
     pub mouse_wheel: f32,
     mouse_down: Vec<MouseButton>,
     mouse_just: Vec<MouseButton>,
+    /// 最近按下的物理键（按键重绑定捕获用，take_raw_key 消费）
+    raw_key: Option<KeyCode>,
 }
 
 impl InputState {
@@ -26,6 +28,9 @@ impl InputState {
 
     pub fn key_event(&mut self, physical: PhysicalKey, state: ElementState) {
         let PhysicalKey::Code(code) = physical else { return };
+        if state == ElementState::Pressed {
+            self.raw_key = Some(code);
+        }
         let Some(a) = self.map.key_action(code) else { return };
         match state {
             ElementState::Pressed => {
@@ -93,5 +98,15 @@ impl InputState {
 
     pub fn map(&self) -> &ActionMap {
         &self.map
+    }
+
+    /// 可变键位表（按键重绑定用）
+    pub fn map_mut(&mut self) -> &mut ActionMap {
+        &mut self.map
+    }
+
+    /// 取走最近按下的物理键（重绑定捕获），无则 None
+    pub fn take_raw_key(&mut self) -> Option<KeyCode> {
+        self.raw_key.take()
     }
 }

@@ -20,6 +20,8 @@ pub enum Action {
     Slot8,
     ToggleDebug,
     ToggleEditor,
+    /// 系统设置菜单（ESC）
+    ToggleMenu,
     Inventory,
     Potion,
     QuickSave,
@@ -62,6 +64,7 @@ impl ActionMap {
         put(KeyCode::Digit8, Action::Slot8);
         put(KeyCode::F3, Action::ToggleDebug);
         put(KeyCode::F1, Action::ToggleEditor);
+        put(KeyCode::Escape, Action::ToggleMenu);
         put(KeyCode::KeyI, Action::Inventory);
         put(KeyCode::KeyQ, Action::Potion);
         put(KeyCode::F5, Action::QuickSave);
@@ -75,6 +78,12 @@ impl ActionMap {
 
     pub fn key_for(&self, action: Action) -> Option<KeyCode> {
         self.keys.iter().find(|(_, v)| **v == action).map(|(k, _)| *k)
+    }
+
+    /// 重绑定：该动作换新键（移除动作旧键，覆盖目标键旧动作）
+    pub fn set_binding(&mut self, key: KeyCode, action: Action) {
+        self.keys.retain(|_, v| *v != action);
+        self.keys.insert(key, action);
     }
 
     pub fn all(&self) -> impl Iterator<Item = (KeyCode, Action)> + '_ {

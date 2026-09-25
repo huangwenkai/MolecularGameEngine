@@ -6,6 +6,8 @@ pub struct Camera {
     pub center: Vec2,
     pub zoom: f32,
     pub viewport: (f32, f32),
+    /// 震屏强度倍率（系统设置，0 = 关闭震动）
+    pub shake_scale: f32,
     shake: f32,
     #[allow(dead_code)]
     shake_rng: Rng,
@@ -18,6 +20,7 @@ impl Default for Camera {
             center: Vec2::ZERO,
             zoom: 3.0,
             viewport: (640.0, 360.0),
+            shake_scale: 1.0,
             shake: 0.0,
             shake_rng: Rng::from_entropy(),
             shake_off: Vec2::ZERO,
@@ -31,7 +34,8 @@ impl Camera {
     }
 
     pub fn add_shake(&mut self, amount: f32) {
-        self.shake = (self.shake + amount).min(12.0);
+        let s = amount * self.shake_scale.max(0.0);
+        self.shake = (self.shake + s).min(12.0);
     }
 
     /// 每帧衰减震屏并更新偏移
