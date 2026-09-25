@@ -153,7 +153,9 @@ impl EguiRenderer {
         }
     }
 
-    /// 处理 egui 每帧的纹理增删（字体图集等）
+    /// 处理 egui 每帧的纹理增删（字体图集等）。
+    /// 注意：字体图集用「脏矩形部分更新」（ImageDelta.pos = Some），必须写入子区域，
+    /// 否则小块会覆盖整个图集导致文字花屏/拉伸。
     pub fn handle_textures(
         &mut self,
         device: &wgpu::Device,
@@ -166,34 +168,34 @@ impl EguiRenderer {
             };
             let w = img.width() as u32;
             let h = img.height() as u32;
+            if w == 0 || h == 0 {
+                continue;
+            }
             let mut data = Vec::with_capacity((w * h * 4) as usize);
             // ColorImage 已是预乘 RGBA（egui 0.32 字体图集同为此格式）
             for c in img.pixels.iter() {
                 data.extend_from_slice(&[c.r(), c.g(), c.b(), c.a()]);
             }
-            if w == 0 || h == 0 {
+
+            // 部分更新：写入已有纹理的子区域
+            if let (Some([px, py]), Some((tex, _))) = (delta.pos, self.textures.get(&id)) {
+                let tex = tex.clone();
+                upload_region(
+                    queue,
+                    &tex,
+                    wgpu::Origin3d { x: px as u32, y: py as u32, z: 0 },
+                    &data,
+                    w,
+                    h,
+                );
                 continue;
             }
+
             let usage = wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST;
-            // 已存在则更新（尺寸相同原地写，否则重建）
+            // 全量更新：尺寸相同原地写，否则重建
             if let Some((old_tex, _)) = self.textures.get(&id) {
-                let old_tex = old_tex.clone();
                 if old_tex.width() == w && old_tex.height() == h {
-                    queue.write_texture(
-                        wgpu::TexelCopyTextureInfo {
-                            texture: &old_tex,
-                            mip_level: 0,
-                            origin: wgpu::Origin3d::ZERO,
-                            aspect: wgpu::TextureAspect::All,
-                        },
-                        &data,
-                        wgpu::TexelCopyBufferLayout {
-                            offset: 0,
-                            bytes_per_row: Some(w * 4),
-                            rows_per_image: None,
-                        },
-                        wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
-                    );
+                    upload_region(queue, old_tex, wgpu::Origin3d::ZERO, &data, w, h);
                     continue;
                 }
             }
@@ -207,21 +209,7 @@ impl EguiRenderer {
                 usage,
                 view_formats: &[],
             });
-            queue.write_texture(
-                wgpu::TexelCopyTextureInfo {
-                    texture: &tex,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d::ZERO,
-                    aspect: wgpu::TextureAspect::All,
-                },
-                &data,
-                wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(w * 4),
-                    rows_per_image: None,
-                },
-                wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
-            );
+            upload_region(queue, &tex, wgpu::Origin3d::ZERO, &data, w, h);
             let view = tex.create_view(&Default::default());
             self.textures.insert(id, (tex, view));
         }
@@ -363,4 +351,41 @@ impl EguiRenderer {
         }
         queue.submit([enc.finish()]);
     }
+}
+
+/// 上传一块 RGBA 到纹理子区域（bytes_per_row 按 256 对齐，不足处行填充）
+fn upload_region(
+    queue: &wgpu::Queue,
+    tex: &wgpu::Texture,
+    origin: wgpu::Origin3d,
+    rgba: &[u8],
+    w: u32,
+    h: u32,
+) {
+    let stride = (w * 4) as usize;
+    let aligned = (stride + 255) / 256 * 256;
+    let padded;
+    let (bytes, bpr): (&[u8], u32) = if aligned == stride {
+        (rgba, stride as u32)
+    } else {
+        // 每行补齐到 256 倍数（wgpu 拷贝对齐要求）
+        let mut p = Vec::with_capacity(aligned * h as usize);
+        for row in 0..h as usize {
+            p.extend_from_slice(&rgba[row * stride..(row + 1) * stride]);
+            p.resize(p.len() + aligned - stride, 0);
+        }
+        padded = p;
+        (&padded, aligned as u32)
+    };
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture: tex,
+            mip_level: 0,
+            origin,
+            aspect: wgpu::TextureAspect::All,
+        },
+        bytes,
+        wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(bpr), rows_per_image: None },
+        wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+    );
 }
