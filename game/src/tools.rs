@@ -86,9 +86,11 @@ pub fn update(
         Tool::Sword => {
             sword_swing = input.just_pressed(Action::Attack);
         }
-        // 以下工具均为左键单击触发单次（悬停不生效）
-        Tool::Pickaxe if in_reach && !busy_with_action && input.just_pressed(Action::Attack) => {
-            // 像素刷挖掘：圆形刷内累积伤害，单击最多破坏 26 像素（挖掘不吸附，保留自由手感）
+        // 以下工具按住左键循环触发（冷却限频）、单击触发一次（悬停不生效）
+        Tool::Pickaxe
+            if in_reach && !busy_with_action && input.pressed(Action::Attack) && t.place_cooldown == 0 =>
+        {
+            // 像素刷挖掘：圆形刷内累积伤害，单次最多破坏 26 像素（挖掘不吸附，保留自由手感）
             let r = 6;
             let mut breaks = 0;
             'outer: for dy in -r..=r {
@@ -104,6 +106,7 @@ pub fn update(
                     }
                 }
             }
+            t.place_cooldown = 8; // 按住循环触发间隔
             if breaks > 0 {
                 shake = 0.5;
             }
@@ -120,7 +123,7 @@ pub fn update(
                 t.scoop_cooldown = 5;
             }
         }
-        Tool::Block if in_reach && input.just_pressed(Action::Attack) => {
+        Tool::Block if in_reach && input.pressed(Action::Attack) => {
             if t.place_cooldown == 0 {
                 // 放置 4x4 石块（2px 吸附 + 玩家保护）
                 let mat = world.mats.id("stone").unwrap_or(0);
@@ -143,24 +146,25 @@ pub fn update(
                 }
             }
         }
-        Tool::Torch if in_reach && input.just_pressed(Action::Attack) => {
+        Tool::Torch if in_reach && input.pressed(Action::Attack) => {
             if t.place_cooldown == 0 && world.place_torch(cx, cy) {
                 t.place_cooldown = 8;
             }
         }
-        Tool::Water | Tool::Sand if in_reach && input.just_pressed(Action::Attack) => {
-            // 单击倒一勺（约 16 像素）
+        Tool::Water | Tool::Sand if in_reach && input.pressed(Action::Attack) && t.place_cooldown == 0 => {
+            // 按住循环倒（间隔 4 tick），单击倒一勺（约 20 像素）
             let mat = match t.tool {
                 Tool::Water => world.mats.id("water").unwrap_or(0),
                 _ => world.mats.id("sand").unwrap_or(0),
             };
-            for _ in 0..16 {
+            for _ in 0..20 {
                 let dx = (world_rng(world) % 7) - 3;
                 let dy = (world_rng(world) % 7) - 3;
                 if dx * dx + dy * dy <= 9 && !world.solid_px(free + dx, fy + dy) {
                     world.pixels.spawn(free + dx, fy + dy, mat, &world.mats);
                 }
             }
+            t.place_cooldown = 4;
         }
         _ => {}
     }

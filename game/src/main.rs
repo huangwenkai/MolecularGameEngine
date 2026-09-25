@@ -73,6 +73,8 @@ pub struct GameApp {
     pub settings: settings::Settings,
     /// 系统设置面板（ESC）
     pub settings_ui: settings::SettingsUi,
+    /// 屏幕提示（文字, 剩余秒数）——背包满等一次性提醒
+    pub hint: (String, f32),
     /// egui 中文字体是否已注入
     fonts_done: bool,
 }
@@ -131,6 +133,7 @@ impl GameApp {
             audio,
             settings,
             settings_ui: settings::SettingsUi::default(),
+            hint: (String::new(), 0.0),
             fonts_done: false,
         }
     }
@@ -246,6 +249,10 @@ impl App for GameApp {
 
         // 新手引导倒计时
         self.guide_t = (self.guide_t - 1.0 / 60.0).max(0.0);
+        // 屏幕提示倒计时
+        if self.hint.1 > 0.0 {
+            self.hint.1 = (self.hint.1 - 1.0 / 60.0).max(0.0);
+        }
 
         // ---- 自测脚本（必须在输入消费之前注入）----
         if self.selftest {
@@ -419,8 +426,8 @@ impl App for GameApp {
             );
         }
 
-        // ---- 远程武器（弓 / 火球法杖）----
-        if !busy && self.tool.place_cooldown == 0 && ctx.input.just_pressed(Action::Attack) {
+        // ---- 远程武器（弓 / 火球法杖）按住循环射击 ----
+        if !busy && self.tool.place_cooldown == 0 && ctx.input.pressed(Action::Attack) {
             let hand = self.player.pos + Vec2::new(0.0, -10.0);
             let dir = (self.mouse_world - hand).normalize_or_zero();
             match self.tool.tool {
@@ -589,12 +596,31 @@ impl App for GameApp {
         }
 
         // ---- 掉落物 ----
-        let picked = self
+        let (picked, bag_full) = self
             .drops
             .update(&mut self.world, self.player.pos, &mut self.inv, &self.db);
         if !picked.is_empty() {
             self.audio.play(audio::Sfx::Pickup);
         }
+        if bag_full {
+            self.hint = ("背包已满！丢掉一些物品才能继续拾取".to_string(), 2.0);
+            self.audio.play(audio::Sfx::Hurt);
+        }
+
+        // ---- 火球移动光源（黑夜发光）----
+        self.world.light.moving_lights = self
+            .projectiles
+            .list
+            .iter()
+            .filter(|p| p.kind == projectiles::ProjKind::Fireball && !p.stuck)
+            .map(|p| {
+                (
+                    (p.pos.x as i32) / LIGHT_CELL,
+                    (p.pos.y as i32 - 4) / LIGHT_CELL,
+                    112u8,
+                )
+            })
+            .collect();
 
         // ---- 刷怪与战斗 AI ----
         self.monsters
@@ -760,6 +786,18 @@ impl App for GameApp {
                         ui.small(format!("({:.0}s 后收起)", self.guide_t));
                     });
                 });
+            }
+        }
+        // ---- 屏幕提示（背包满等一次性提醒）----
+        if self.hint.1 > 0.0 {
+            if let Some(egui) = ctx.egui {
+                Area::new(Id::new("hint"))
+                    .anchor(Align2::CENTER_BOTTOM, [0.0, -72.0])
+                    .show(egui, |ui| {
+                        EguiFrame::group(ui.style()).show(ui, |ui| {
+                            ui.colored_label(egui::Color32::YELLOW, self.hint.0.as_str());
+                        });
+                    });
             }
         }
         ctx.sky_color = self.world.sky_color();

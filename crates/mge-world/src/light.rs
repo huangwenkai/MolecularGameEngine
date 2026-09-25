@@ -29,6 +29,12 @@ fn is_opaque(pixels: &PixelWorld, mats: &Materials, cx: i32, cy: i32) -> bool {
     d.kind == Kind::Static && d.solid
 }
 
+/// 区间包含判断
+#[inline]
+fn cx_ok(v: i32, lo: i32, hi: i32) -> bool {
+    v >= lo && v <= hi
+}
+
 pub struct LightMap {
     pub cw: i32,
     pub ch: i32,
@@ -38,12 +44,16 @@ pub struct LightMap {
     pub emissive: HashMap<(i32, i32), u32>,
     /// 玩家微光位置（格坐标）
     pub player_glow: Option<(i32, i32)>,
+    /// 移动光源（格坐标 + 强度，如火球），外部每帧写入
+    pub moving_lights: Vec<(i32, i32, u8)>,
     /// 独立脏区列表（格坐标 x0/y0/x1/y1 闭区间）
     dirty: Vec<(i32, i32, i32, i32)>,
-    /// 微光移动（仅 block 通道需要重算，天空不受影响）
+    /// 微光/移动光源变化（仅 block 通道需要重算，天空不受影响）
     glow_dirty: bool,
     /// 上次微光位置（变化时标记脏区）
     last_glow: Option<(i32, i32)>,
+    /// 上次移动光源（变化时标记脏区）
+    last_moving: Vec<(i32, i32, u8)>,
 }
 
 impl LightMap {
@@ -55,9 +65,11 @@ impl LightMap {
             block: vec![0; (cw * ch) as usize],
             emissive: HashMap::new(),
             player_glow: None,
+            moving_lights: Vec::new(),
             dirty: Vec::new(),
             glow_dirty: false,
             last_glow: None,
+            last_moving: Vec::new(),
         }
     }
 
@@ -79,11 +91,12 @@ impl LightMap {
         self.dirty.push(nr);
     }
 
-    /// 玩家微光移动 → 标记 block 通道脏（静止时不产生脏区）
+    /// 玩家微光/移动光源变化 → 标记 block 通道脏（静止时不产生脏区）
     pub fn mark_glow(&mut self) {
-        if self.player_glow != self.last_glow {
+        if self.player_glow != self.last_glow || self.moving_lights != self.last_moving {
             self.glow_dirty = true;
             self.last_glow = self.player_glow;
+            self.last_moving = self.moving_lights.clone();
         }
     }
 
@@ -160,17 +173,7 @@ impl LightMap {
         }
         if done.len() < LIGHT_QUOTA && self.glow_dirty {
             self.glow_dirty = false;
-            if let Some((gx, gy)) = self.player_glow {
-                const R: i32 = 8; // 微光 48 ≈ 6 格可达，取 8 留余量
-                let b = self.relight_glow_region(
-                    pixels,
-                    mats,
-                    torches,
-                    (gx - R).max(0).min(self.cw - 1),
-                    (gy - R).max(0).min(self.ch - 1),
-                    (gx + R).min(self.cw - 1),
-                    (gy + R).min(self.ch - 1),
-                );
+            if let Some(b) = self.relight_glow_region(pixels, mats, torches) {
                 done.push(b);
             }
         }
@@ -233,17 +236,37 @@ impl LightMap {
         Some((ex0, ey0, ex1, ey1))
     }
 
-    /// 重算微光区域：只清零内圈 block → 种子 → 边界环 → 仅方块通道 BFS（跳过天空列扫描）
+    /// 重算移动光源区域：只清零内圈 block → 种子 → 边界环 → 仅方块通道 BFS（跳过天空列扫描）。
+    /// 内圈 = 玩家微光 + 全部移动光源的联合包围盒 ± R。
     fn relight_glow_region(
         &mut self,
         pixels: &PixelWorld,
         mats: &Materials,
         torches: &[(i32, i32)],
-        ix0: i32,
-        iy0: i32,
-        ix1: i32,
-        iy1: i32,
-    ) -> (i32, i32, i32, i32) {
+    ) -> Option<(i32, i32, i32, i32)> {
+        // 所有移动光源的联合包围盒
+        const R: i32 = 12; // 微光 48≈6 格、火球 112≈12 格可达，取 12 留余量
+        let mut b = (self.cw, self.ch, 0, 0); // 反向初始值，任意光源都会收窄
+        if let Some((gx, gy)) = self.player_glow {
+            b.0 = b.0.min(gx);
+            b.1 = b.1.min(gy);
+            b.2 = b.2.max(gx);
+            b.3 = b.3.max(gy);
+        }
+        for &(lx, ly, _) in &self.moving_lights {
+            b.0 = b.0.min(lx);
+            b.1 = b.1.min(ly);
+            b.2 = b.2.max(lx);
+            b.3 = b.3.max(ly);
+        }
+        if b.0 > b.2 {
+            // 无任何移动光源
+            return None;
+        }
+        let ix0 = (b.0 - R).max(0).min(self.cw - 1);
+        let iy0 = (b.1 - R).max(0).min(self.ch - 1);
+        let ix1 = (b.2 + R).min(self.cw - 1);
+        let iy1 = (b.3 + R).min(self.ch - 1);
         let ex0 = (ix0 - REGION_MARGIN).max(0);
         let ey0 = (iy0 - REGION_MARGIN).max(0);
         let ex1 = (ix1 + REGION_MARGIN).min(self.cw - 1);
@@ -259,7 +282,7 @@ impl LightMap {
         Self::seed_block(torches, ix0, iy0, ix1, iy1, self, &mut queue2);
         self.seed_ring(&self.block, ex0, ey0, ex1, ey1, &mut queue2);
         bfs_fill(&mut self.block, &mut queue2, self.cw, &opaque, (ex0, ey0, ex1, ey1));
-        (ex0, ey0, ex1, ey1)
+        Some((ex0, ey0, ex1, ey1))
     }
 
     /// 收集边界环上已有光照值作为 BFS 种子（光从区域外流入）
@@ -318,12 +341,22 @@ impl LightMap {
                 queue2.push_back(((cy * me.cw + cx) as u32, v));
             }
         }
-        if let Some((cx, cy)) = me.player_glow {
-            if cx >= ix0 && cx <= ix1 && cy >= iy0 && cy <= iy1 {
-                let i = (cy * me.cw + cx) as usize;
+        if let Some((gx, gy)) = me.player_glow {
+            if cx_ok(gx, ix0, ix1) && cx_ok(gy, iy0, iy1) {
+                let i = (gy * me.cw + gx) as usize;
                 if me.block[i] < 48 {
                     me.block[i] = 48;
-                    queue2.push_back(((cy * me.cw + cx) as u32, 48));
+                    queue2.push_back(((gy * me.cw + gx) as u32, 48));
+                }
+            }
+        }
+        // 移动光源（火球等）
+        for &(lx, ly, lv) in &me.moving_lights {
+            if cx_ok(lx, ix0, ix1) && cx_ok(ly, iy0, iy1) {
+                let i = (ly * me.cw + lx) as usize;
+                if me.block[i] < lv {
+                    me.block[i] = lv;
+                    queue2.push_back(((ly * me.cw + lx) as u32, lv));
                 }
             }
         }

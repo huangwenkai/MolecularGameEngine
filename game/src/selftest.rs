@@ -48,15 +48,13 @@ pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
         105 => input.inject(Action::Jump, RELEASE),
         150 => input.inject(Action::Right, RELEASE),
         // 倒水（落在脚边平地成池）+ 倒沙（高处落下堆成沙堆）
-        // 工具改为左键单击单次触发：循环点击倒出足量
+        // 工具按住左键循环触发：按住期间持续倒出
         170 => input.inject(Action::Slot5, PRESS),
         171 => input.inject(Action::Slot5, RELEASE),
         175..=249 => {
             aim(input, cam, px + 10.0, py - 30.0);
-            if tick % 3 == 0 {
+            if tick == 175 {
                 input.inject(Action::Attack, PRESS);
-            } else if tick % 3 == 2 {
-                input.inject(Action::Attack, RELEASE);
             }
         }
         250 => input.inject(Action::Attack, RELEASE),
@@ -65,10 +63,8 @@ pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
         // 沙倒在脚边水洼里：沙沉底堆积，把角色托起（粉末支撑验证）
         260..=339 => {
             aim(input, cam, px + 2.0, py - 24.0);
-            if tick % 3 == 0 {
+            if tick == 260 {
                 input.inject(Action::Attack, PRESS);
-            } else if tick % 3 == 2 {
-                input.inject(Action::Attack, RELEASE);
             }
         }
         340 => input.inject(Action::Attack, RELEASE),
@@ -93,10 +89,8 @@ pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
         486 => input.inject(Action::Slot2, RELEASE),
         490..=599 => {
             aim(input, cam, px + 20.0, py + 12.0);
-            if tick % 3 == 0 {
+            if tick == 490 {
                 input.inject(Action::Attack, PRESS);
-            } else if tick % 3 == 2 {
-                input.inject(Action::Attack, RELEASE);
             }
         }
         600 => input.inject(Action::Attack, RELEASE),
@@ -116,10 +110,8 @@ pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
         656 => input.inject(Action::Slot4, RELEASE),
         660..=679 => {
             aim(input, cam, px + 16.0, py - 18.0);
-            if tick % 3 == 0 {
+            if tick == 660 {
                 input.inject(Action::Attack, PRESS);
-            } else if tick % 3 == 2 {
-                input.inject(Action::Attack, RELEASE);
             }
         }
         680 => input.inject(Action::Attack, RELEASE),

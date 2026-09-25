@@ -39,7 +39,8 @@ impl Drops {
         }
     }
 
-    /// 更新：像素重力 / 水面浮力 / 磁吸 / 拾取。返回拾取物品名列表（UI 提示用）
+    /// 更新：像素重力 / 水面浮力 / 磁吸 / 拾取。
+    /// 返回 (拾取物品名列表, 是否发生背包满)（UI 提示用）
     #[allow(clippy::too_many_arguments)]
     pub fn update(
         &mut self,
@@ -47,9 +48,10 @@ impl Drops {
         player_pos: Vec2,
         inv: &mut Inventory,
         db: &ItemDb,
-    ) -> Vec<String> {
+    ) -> (Vec<String>, bool) {
         let water = world.pixels.ids.water;
         let mut picked = Vec::new();
+        let mut bag_full = false;
         self.list.retain_mut(|d| {
             d.age += 1.0 / 60.0;
             if d.delay > 0.0 {
@@ -62,16 +64,17 @@ impl Drops {
             if d.delay <= 0.0 {
                 let to_p = player_pos + Vec2::new(0.0, -8.0) - d.pos;
                 let dist = to_p.length();
-                if dist < 44.0 {
-                    let pull = to_p.normalize_or_zero() * 620.0 * (1.0 - dist / 44.0);
+                if dist < 56.0 {
+                    let pull = to_p.normalize_or_zero() * 980.0 * (1.0 - dist / 56.0);
                     d.vel += pull / 60.0;
-                    if dist < 6.0 {
+                    if dist < 8.0 {
                         if inv.add(d.item.clone(), db) {
                             picked.push(db.def(&d.item.def).name.clone());
                             return false;
                         }
-                        // 背包满：不再吸
+                        // 背包满：不再吸（并提示玩家）
                         d.vel = -d.vel * 0.5;
+                        bag_full = true;
                     }
                 }
             }
@@ -113,7 +116,7 @@ impl Drops {
             }
             d.pos.y < (world.pixels.h + 64) as f32
         });
-        picked
+        (picked, bag_full)
     }
 
     /// 渲染：稀有度光柱 + 物品色块
