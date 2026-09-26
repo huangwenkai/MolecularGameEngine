@@ -655,12 +655,18 @@ pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
             game.player.pos = Vec2::new(tx as f32 + 0.5, sy as f32 - 2.0);
             game.player.vel = Vec2::ZERO;
             game.world.time = 0.30;
-            // 调试：统计右侧森林区域的树像素
+            // 调试：统计右侧森林区域的树/植被像素
             let (wood, leaf) = (
                 game.world.mats.id("wood").unwrap_or(0),
                 game.world.mats.id("leaf").unwrap_or(0),
             );
+            let grass = game.world.mats.id("tall_grass").unwrap_or(0);
+            let flowers: Vec<u8> = ["flower_red", "flower_yellow", "flower_blue"]
+                .iter()
+                .filter_map(|n| game.world.mats.id(n))
+                .collect();
             let (mut wn, mut ln) = (0u32, 0u32);
+            let (mut gn, mut fn_) = (0u32, 0u32);
             let mut cols: Vec<i32> = Vec::new();
             for x in 2300..3300 {
                 for y in 300..800 {
@@ -670,12 +676,59 @@ pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
                         cols.push(x);
                     } else if m == leaf {
                         ln += 1;
+                    } else if m == grass {
+                        gn += 1;
+                    } else if flowers.contains(&m) {
+                        fn_ += 1;
                     }
                 }
             }
             cols.dedup();
             let (minx, maxx) = (cols.first().copied().unwrap_or(0), cols.last().copied().unwrap_or(0));
-            println!("[SELFTEST] tree px wood {wn} leaf {ln} | trunk cols {} span {minx}..{maxx}", cols.len());
+            println!(
+                "[SELFTEST] tree px wood {wn} leaf {ln} | trunk cols {} span {minx}..{maxx} | veg grass {gn} flowers {fn_}",
+                cols.len()
+            );
+        }
+        1249 => {
+            // 人物形象回归检查：默认贴图带眼睛 + 像素编辑读写 + 图集打包
+            let eye_ok = game.skin.get("char_head").map(|pt| {
+                let (w, h) = pt.img.dimensions();
+                let dark = |x: u32, y: u32| {
+                    let p = pt.img.get_pixel(x, y).0;
+                    p[3] == 255 && p[0] < 100
+                };
+                dark(w * 5 / 8, h * 4 / 8) && dark((w * 6 / 8).min(w - 1), h * 4 / 8)
+            }).unwrap_or(false);
+            let edit_ok = game.skin.get_mut("char_torso").map(|pt| {
+                pt.img.put_pixel(0, 0, image::Rgba([255, 0, 0, 255]));
+                pt.img.get_pixel(0, 0).0 == [255, 0, 0, 255]
+            }).unwrap_or(false);
+            let packed = game.skin.get("char_head").map(|p| p.ax > 0).unwrap_or(false);
+            let ok = eye_ok && edit_ok && packed;
+            println!(
+                "[SELFTEST] char skin {} | eyes {eye_ok} edit {edit_ok} atlas {packed}",
+                if ok { "PASS" } else { "FAIL" }
+            );
+            // 植被重新生长回归检查：密度清零 → 植被应被全部清除
+            let mut defs = game.veg.plants.clone();
+            for d in &mut defs {
+                d.density = 0.0;
+            }
+            game.world.regrow_vegetation(&defs);
+            let grass = game.world.mats.id("tall_grass").unwrap_or(0);
+            let mut n = 0u32;
+            for y in 0..(game.world.pixels.h / 2) {
+                for x in 0..game.world.pixels.w {
+                    if game.world.pixels.get(x, y).mat == grass {
+                        n += 1;
+                    }
+                }
+            }
+            println!(
+                "[SELFTEST] veg regrow {} | grass px {n}",
+                if n == 0 { "PASS" } else { "FAIL" }
+            );
         }
         // 入夜
         935 => {

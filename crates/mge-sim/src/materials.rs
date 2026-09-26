@@ -154,6 +154,11 @@ impl Materials {
         self.by_name.get(name).copied()
     }
 
+    /// 全部材质名（编辑器下拉列表用）
+    pub fn names(&self) -> Vec<String> {
+        self.by_name.keys().cloned().collect()
+    }
+
     pub fn len(&self) -> usize {
         self.defs.len()
     }

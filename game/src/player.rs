@@ -543,7 +543,25 @@ fn wall_dir_at(world: &World, p: &Player) -> f32 {
     }
 }
 
-/// 程序化动画渲染：分层部件 + 手臂持械跟随
+/// 推入一个部件：有人物形象贴图用贴图（受伤时染色），否则回退纯色块
+#[allow(clippy::too_many_arguments)]
+fn push_part(
+    batch: &mut mge_render::SpriteBatch,
+    regions: &std::collections::HashMap<String, mge_render::Region>,
+    white: &mge_render::Region,
+    key: &str,
+    center: Vec2,
+    size: Vec2,
+    color: [f32; 4],
+    tex_tint: [f32; 4],
+) {
+    match regions.get(key) {
+        Some(r) => batch.push_at(center, size, r, tex_tint),
+        None => batch.push_at(center, size, white, color),
+    }
+}
+
+/// 程序化动画渲染：分层部件 + 手臂持械跟随（部件外观可逐像素编辑）
 #[allow(clippy::too_many_arguments)]
 pub fn render(
     p: &Player,
@@ -567,6 +585,8 @@ pub fn render(
     let pants = tint([0.26, 0.26, 0.34]);
     let hair = tint([0.35, 0.24, 0.12]);
     let shoe = tint([0.20, 0.20, 0.22]);
+    // 自定义形象贴图的着色（正常显示原色；受伤闪红）
+    let tex_tint: [f32; 4] = if flash { [2.5, 0.3, 0.3, 1.0] } else { [1.0; 4] };
 
     let f = p.facing;
     let base = p.pos; // 脚底中心
@@ -579,15 +599,15 @@ pub fn render(
     // 腿（两条，交错摆动）
     let leg1 = base + Vec2::new(-1.8 + swing * 1.6 * f, -4.0 - leg_lift + bob * 0.3);
     let leg2 = base + Vec2::new(1.8 - swing * 1.6 * f, -4.0 + leg_lift * 0.3 + bob * 0.3);
-    batch.push_at(leg1, Vec2::new(3.2, 8.0), white, pants);
-    batch.push_at(leg2, Vec2::new(3.2, 8.0), white, pants);
+    push_part(batch, regions, white, "char_leg", leg1, Vec2::new(4.0, 8.0), pants, tex_tint);
+    push_part(batch, regions, white, "char_leg", leg2, Vec2::new(4.0, 8.0), pants, tex_tint);
     // 鞋
-    batch.push_at(leg1 + Vec2::new(0.0, 3.5), Vec2::new(3.4, 2.0), white, shoe);
-    batch.push_at(leg2 + Vec2::new(0.0, 3.5), Vec2::new(3.4, 2.0), white, shoe);
+    push_part(batch, regions, white, "char_shoe", leg1 + Vec2::new(0.0, 3.5), Vec2::new(4.0, 2.0), shoe, tex_tint);
+    push_part(batch, regions, white, "char_shoe", leg2 + Vec2::new(0.0, 3.5), Vec2::new(4.0, 2.0), shoe, tex_tint);
 
     // 躯干
     let torso = base + Vec2::new(0.0, -11.5 - bob * 0.5);
-    batch.push_at(torso, Vec2::new(8.0, 8.5), white, shirt);
+    push_part(batch, regions, white, "char_torso", torso, Vec2::new(8.0, 9.0), shirt, tex_tint);
 
     // 后臂（反向摆）
     let shoulder_b = torso + Vec2::new(-1.0 * f, -3.0);
@@ -598,17 +618,34 @@ pub fn render(
     };
     let arm_len = 7.5;
     let hand_b = shoulder_b + Vec2::new(back_ang.cos() * arm_len * 0.5, back_ang.sin() * arm_len * 0.5);
-    batch.push(hand_b, Vec2::new(3.0, 8.0), back_ang, white, shirt);
+    if regions.contains_key("char_arm") {
+        batch.push(hand_b, Vec2::new(4.0, 8.0), back_ang, regions.get("char_arm").unwrap(), tex_tint);
+    } else {
+        batch.push(hand_b, Vec2::new(3.0, 8.0), back_ang, white, shirt);
+    }
 
-    // 头 + 头发
+    // 头 + 头发（朝左时水平镜像，让五官朝向正确）
     let head = torso + Vec2::new(0.5 * f, -6.0);
-    batch.push_at(head, Vec2::new(7.0, 7.0), white, skin);
-    batch.push_at(head + Vec2::new(-0.5 * f, -2.6), Vec2::new(7.4, 3.0), white, hair);
+    push_part(batch, regions, white, "char_head", head, Vec2::new(8.0 * f, 8.0), skin, tex_tint);
+    push_part(
+        batch,
+        regions,
+        white,
+        "char_hair",
+        head + Vec2::new(-0.5 * f, -2.6),
+        Vec2::new(8.0 * f, 4.0),
+        hair,
+        tex_tint,
+    );
 
     // 前臂（持械，指向 arm_angle）
     let shoulder_f = torso + Vec2::new(1.2 * f, -3.0);
     let hand_f = shoulder_f + Vec2::new(arm_angle.cos() * arm_len * 0.6, arm_angle.sin() * arm_len * 0.6);
-    batch.push(hand_f, Vec2::new(3.0, 8.0), arm_angle, white, skin);
+    if regions.contains_key("char_arm") {
+        batch.push(hand_f, Vec2::new(4.0, 8.0), arm_angle, regions.get("char_arm").unwrap(), tex_tint);
+    } else {
+        batch.push(hand_f, Vec2::new(3.0, 8.0), arm_angle, white, skin);
+    }
 
     // 剑：挂在手上，沿手臂方向
     if holding_sword {

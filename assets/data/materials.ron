@@ -43,5 +43,19 @@
         (name: "wall_stone", kind: Static, color: (74, 74, 82),   jitter: 10),
         (name: "wall_snow",  kind: Static, color: (128, 136, 152), jitter: 10),
         (name: "wall_sand",  kind: Static, color: (148, 116, 72), jitter: 10),
+
+        // ---- 植被（背景层装饰，vegetation.ron 数据驱动引用；可按需追加新材质）----
+        (name: "tall_grass",    kind: Static, solid: false, color: (96, 158, 62),    jitter: 24, hp: 1, flammable: 180),
+        (name: "dry_grass",     kind: Static, solid: false, color: (176, 152, 88),   jitter: 22, hp: 1, flammable: 200),
+        (name: "flower_red",    kind: Static, solid: false, color: (216, 66, 70),    jitter: 18, hp: 1, flammable: 150),
+        (name: "flower_yellow", kind: Static, solid: false, color: (232, 202, 70),   jitter: 18, hp: 1, flammable: 150),
+        (name: "flower_blue",   kind: Static, solid: false, color: (98, 132, 222),   jitter: 18, hp: 1, flammable: 150),
+        (name: "flower_white",  kind: Static, solid: false, color: (232, 232, 224),  jitter: 12, hp: 1, flammable: 150),
+        (name: "bush_leaf",     kind: Static, solid: false, color: (56, 106, 46),    jitter: 22, hp: 2, flammable: 220),
+        (name: "mushroom_cap",  kind: Static, solid: false, color: (198, 82, 66),    jitter: 16, hp: 1),
+        (name: "mushroom_stem", kind: Static, solid: false, color: (224, 212, 192),  jitter: 12, hp: 1),
+        (name: "cactus",        kind: Static, solid: false, color: (88, 142, 72),    jitter: 16, hp: 3),
+        (name: "dead_bush",     kind: Static, solid: false, color: (126, 98, 60),    jitter: 20, hp: 1, flammable: 230),
+        (name: "frost_shrub",   kind: Static, solid: false, color: (146, 172, 180),  jitter: 16, hp: 1),
     ],
 )

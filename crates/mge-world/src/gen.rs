@@ -7,6 +7,19 @@ use noise::{Fbm, NoiseFn, Perlin};
 pub struct GenResult {
     pub spawn_x: i32,
     pub spawn_y: i32,
+    /// 植被用到的材质 id（背景标记用）
+    pub veg_mats: Vec<u8>,
+}
+
+/// 生物群系判定（0 雪原 / 1 森林 / 2 沙漠），与植被定义表共用
+pub fn biome_at(w: i32, x: i32) -> u8 {
+    if (x as f32) < w as f32 * 0.22 {
+        0
+    } else if (x as f32) > w as f32 * 0.78 {
+        2
+    } else {
+        1
+    }
 }
 
 /// 写入一个带颜色抖动的地形像素（无条件覆盖）
@@ -31,8 +44,8 @@ fn put_if_empty(pixels: &mut PixelWorld, mats: &Materials, rng: &mut Rng, x: i32
     }
 }
 
-/// 仅空位写入指定明度的像素（树/装饰用，明度 0..=255，128 为标准亮度）
-fn put_shade_if_empty(pixels: &mut PixelWorld, x: i32, y: i32, mat: u8, shade: i32) {
+/// 仅空位写入指定明度的像素（树/植被/装饰用，明度 0..=255，128 为标准亮度）
+pub(crate) fn put_shade_if_empty(pixels: &mut PixelWorld, x: i32, y: i32, mat: u8, shade: i32) {
     if mat == 0 || x < 0 || y < 0 || x >= pixels.w || y >= pixels.h {
         return;
     }
@@ -144,6 +157,7 @@ pub fn generate(
     mats: &Materials,
     walls: &mut [u8],
     wall_shade: &mut [u8],
+    veg_defs: &[crate::veg::PlantDef],
 ) -> GenResult {
     let (w, h) = (pixels.w, pixels.h);
     let id = |name: &str| mats.id(name).unwrap_or(0);
@@ -167,15 +181,7 @@ pub fn generate(
         let n2 = fbm_terr2.get([x as f64 * 0.028, 50.0]);
         surf[x as usize] = (h as f64 * 0.34 + n1 * 44.0 + n2 * 10.0).round() as i32;
     }
-    let biome = |x: i32| -> u8 {
-        if (x as f32) < w as f32 * 0.22 {
-            0 // 雪原
-        } else if (x as f32) > w as f32 * 0.78 {
-            2 // 沙漠
-        } else {
-            1 // 森林
-        }
-    };
+    let biome = |x: i32| biome_at(w, x);
 
     // ---- 地层填充 ----
     for x in 0..w {
@@ -285,6 +291,9 @@ pub fn generate(
         }
     }
 
+    // ---- 植被（背景层装饰，数据驱动 vegetation.ron，按生物群系生成）----
+    let veg_mats = crate::veg::grow(pixels, mats, veg_defs, &surf, biome, &mut rng);
+
     // ---- 背景墙（地下洞穴背景，泰拉瑞亚式：4px/格，洞穴中保留形成封闭背景）----
     let (wall_dirt, wall_stone) = (id("wall_dirt"), id("wall_stone"));
     let (wall_snow, wall_sand) = (id("wall_snow"), id("wall_sand"));
@@ -390,5 +399,9 @@ pub fn generate(
     }
 
     let cx = w / 2;
-    GenResult { spawn_x: cx, spawn_y: surf[cx as usize] - 24 }
+    GenResult {
+        spawn_x: cx,
+        spawn_y: surf[cx as usize] - 24,
+        veg_mats,
+    }
 }

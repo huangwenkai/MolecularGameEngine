@@ -7,8 +7,12 @@ pub struct Art {
     pub regions: std::collections::HashMap<String, mge_render::Region>,
 }
 
-/// 生成全部贴图并构建图集（动画帧一并打包）
-pub fn build(ctx_renderer: &mut mge_render::renderer::Renderer, anims: &mut crate::anim::AnimBank) -> Art {
+/// 生成全部贴图并构建图集（动画帧一并打包；人物部件运行时追加分配）
+pub fn build(
+    ctx_renderer: &mut mge_render::renderer::Renderer,
+    anims: &mut crate::anim::AnimBank,
+    char: &mut crate::character::Skin,
+) -> Art {
     let mut b = AtlasBuilder::new(1024);
 
     // 基础白色块（角色/部件/放置预览染色用）
@@ -81,7 +85,27 @@ pub fn build(ctx_renderer: &mut mge_render::renderer::Renderer, anims: &mut crat
     // 序列帧动画帧打包（数据驱动：assets/anims/*.png + animations.ron）
     anims.pack(&mut b);
 
-    let regions = ctx_renderer.set_atlas(b);
+    let mut regions = ctx_renderer.set_atlas(b);
+
+    // 人物部件：运行时追加分配图集区域并上传（编辑器逐像素修改后热更新）
+    let s = ctx_renderer.atlas_size() as f32;
+    for part in &mut char.parts {
+        let (w, h) = part.img.dimensions();
+        if let Some((x, y)) = ctx_renderer.atlas_alloc(w, h) {
+            ctx_renderer.upload_atlas(x, y, w, h, part.img.as_raw());
+            part.ax = x;
+            part.ay = y;
+            regions.insert(
+                part.key.to_string(),
+                mge_render::Region {
+                    uv0: [x as f32 / s, y as f32 / s],
+                    uv1: [(x + w) as f32 / s, (y + h) as f32 / s],
+                    size: [w as f32, h as f32],
+                },
+            );
+        }
+    }
+
     Art { regions }
 }
 

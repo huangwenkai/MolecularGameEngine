@@ -26,6 +26,8 @@ pub struct World {
     pub wall_h: i32,
     pub walls: Vec<u8>,
     pub wall_shade: Vec<u8>,
+    /// 植被用到的材质 id（背景标记；重新生长后更新）
+    pub veg_mats: Vec<u8>,
     /// 一天的时间 0..1（0 = 黎明）
     pub time: f32,
     /// 一天的现实秒数
@@ -64,12 +66,18 @@ impl SimHooks for WorldHooks<'_> {
 
 impl World {
     pub fn new(seed: u64, w_px: i32, h_px: i32) -> Self {
+        let defs = crate::veg::VegFile::embedded();
+        Self::new_with_veg(seed, w_px, h_px, &defs.plants)
+    }
+
+    /// 按给定植被定义创建世界（游戏层传入 vegetation.ron 内容，支持运行时编辑）
+    pub fn new_with_veg(seed: u64, w_px: i32, h_px: i32, veg_defs: &[crate::veg::PlantDef]) -> Self {
         let mats = Materials::embedded();
         let mut pixels = PixelWorld::new(seed, w_px, h_px, &mats);
         let (wall_w, wall_h) = (w_px / 4, h_px / 4);
         let mut walls = vec![0u8; (wall_w * wall_h) as usize];
         let mut wall_shade = vec![0u8; (wall_w * wall_h) as usize];
-        let gr = gen::generate(seed, &mut pixels, &mats, &mut walls, &mut wall_shade);
+        let gr = gen::generate(seed, &mut pixels, &mats, &mut walls, &mut wall_shade, veg_defs);
         let light = LightMap::new(
             (w_px + LIGHT_CELL - 1) / LIGHT_CELL,
             (h_px + LIGHT_CELL - 1) / LIGHT_CELL,
@@ -83,6 +91,7 @@ impl World {
             wall_h,
             walls,
             wall_shade,
+            veg_mats: gr.veg_mats,
             time: 0.20,
             day_len: 480.0,
             spawn_x: gr.spawn_x,
@@ -118,6 +127,27 @@ impl World {
     /// 地形变化标记（触发光照重算）
     pub fn mark_terrain_dirty(&mut self) {
         self.terrain_dirty = true;
+    }
+
+    /// 清除现有植被并按新定义重新生长（植被编辑器"重新生长"）
+    pub fn regrow_vegetation(&mut self, defs: &[crate::veg::PlantDef]) {
+        // 旧植被材质 + 新定义材质都要清除（防止定义换了材质后残留）
+        let mut ids = self.veg_mats.clone();
+        for id in crate::veg::resolve_mats(defs, &self.mats) {
+            if !ids.contains(&id) {
+                ids.push(id);
+            }
+        }
+        let grown;
+        {
+            let Self { pixels, mats, rng, .. } = self;
+            let surf = crate::veg::current_surf(pixels, mats);
+            crate::veg::clear(pixels, &ids, &surf);
+            let w = pixels.w;
+            grown = crate::veg::grow(pixels, mats, defs, &surf, |x| gen::biome_at(w, x), rng);
+        }
+        self.veg_mats = grown;
+        self.mark_terrain_dirty();
     }
 
     /// 取走光照纹理上传任务（全量 / 多个区域）

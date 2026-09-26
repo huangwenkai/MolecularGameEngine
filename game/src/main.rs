@@ -4,6 +4,7 @@ mod anim;
 mod art;
 mod astar;
 mod audio;
+mod character;
 mod debug;
 mod drops;
 mod editor;
@@ -71,6 +72,10 @@ pub struct GameApp {
     pub audio: audio::Audio,
     /// 系统设置（音量/震动/键位，持久化于 saves/settings.ron）
     pub settings: settings::Settings,
+    /// 植被定义（vegetation.ron，编辑器可编辑 + 重新生长）
+    pub veg: mge_world::veg::VegFile,
+    /// 人物形象（部件贴图，F1 人物页逐像素编辑）
+    pub skin: character::Skin,
     /// 系统设置面板（ESC）
     pub settings_ui: settings::SettingsUi,
     /// 屏幕提示（文字, 剩余秒数）——背包满等一次性提醒
@@ -81,7 +86,8 @@ pub struct GameApp {
 
 impl GameApp {
     pub fn new(seed: u64, selftest: bool) -> Self {
-        let world = World::new(seed, WORLD_W_PX, WORLD_H_PX);
+        let veg = editor::load_veg();
+        let world = World::new_with_veg(seed, WORLD_W_PX, WORLD_H_PX, &veg.plants);
         tracing::info!("new: world ok");
         let spawn =
             Vec2::new(world.spawn_x as f32 + 0.5, world.spawn_y as f32);
@@ -132,6 +138,8 @@ impl GameApp {
             guide_t: 8.0,
             audio,
             settings,
+            veg,
+            skin: character::load(),
             settings_ui: settings::SettingsUi::default(),
             hint: (String::new(), 0.0),
             fonts_done: false,
@@ -185,8 +193,8 @@ impl GameApp {
 
 impl App for GameApp {
     fn init(&mut self, ctx: &mut EngineCtx) {
-        // 程序化美术 + 图集上传（含动画帧打包）
-        let art = art::build(ctx.renderer, &mut self.anims);
+        // 程序化美术 + 图集上传（含动画帧/人物部件打包）
+        let art = art::build(ctx.renderer, &mut self.anims, &mut self.skin);
         self.regions = art.regions;
         // 调色板 + 世界/光照纹理
         let pal = art::palette(&self.world.mats);
@@ -311,6 +319,23 @@ impl App for GameApp {
             // 材质表重载 → 重建调色板纹理
             let pal = art::palette(&self.world.mats);
             ctx.renderer.set_palette(&pal);
+        }
+        // 植被编辑器：重新生长（清除现有植被 → 按当前定义重铺）
+        if self.editor.veg_regrow_req {
+            self.editor.veg_regrow_req = false;
+            let defs = self.veg.plants.clone();
+            self.world.regrow_vegetation(&defs);
+            tracing::info!("植被已重新生长（{} 种）", defs.len());
+        }
+        // 人物形象编辑器：像素变更 → 上传图集（实时生效）
+        if !self.editor.char_dirty.is_empty() {
+            let keys: Vec<&str> = self.editor.char_dirty.drain(..).collect();
+            for key in keys {
+                if let Some(pt) = self.skin.get(key) {
+                    let (w, h) = pt.img.dimensions();
+                    ctx.renderer.upload_atlas(pt.ax, pt.ay, w, h, pt.img.as_raw());
+                }
+            }
         }
         let fx = self.weapons.clone();
 
@@ -711,11 +736,16 @@ impl App for GameApp {
         ));
 
         // ---- 世界纹理上传（地形+动态像素同源，按脏 chunk 粒度）----
-        // 背景材质（树/叶/浆果丛/绳索）在材质字节打最高位标记 → 背景通道绘制（不遮挡角色）
-        let bg_mats: Vec<u8> = ["wood", "leaf", "berry", "rope"]
+        // 背景材质（树/叶/浆果丛/绳索 + 植被）在材质字节打最高位标记 → 背景通道绘制（不遮挡角色）
+        let mut bg_mats: Vec<u8> = ["wood", "leaf", "berry", "rope"]
             .iter()
             .filter_map(|n| self.world.mats.id(n))
             .collect();
+        for id in &self.world.veg_mats {
+            if !bg_mats.contains(id) {
+                bg_mats.push(*id);
+            }
+        }
         {
             let mut data = Vec::with_capacity(128 * 128 * 2);
             for (ci, rect) in self.world.pending_uploads.drain(..) {
