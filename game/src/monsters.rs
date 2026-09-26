@@ -463,15 +463,21 @@ impl Monsters {
 
             // ---- 物理（像素碰撞；蝙蝠无重力已单独处理）----
             if m.kind != Kind::Bat {
-                // 撞墙跳（地面怪自动越过障碍）
+                // 撞墙跳：仅矮障碍（≤16px）自动跳过；高墙阻挡（防止沿峭壁反复跳爬）
                 let steps = 2;
                 for _ in 0..steps {
                     let nx = m.pos.x + m.vel.x / 60.0 / steps as f32;
-                    if world.solid_px(nx as i32, m.pos.y as i32)
-                        && world.solid_px(nx as i32, (m.pos.y - m.half.y) as i32)
-                    {
-                        if m.vel.y >= 0.0 && world.solid_px(m.pos.x as i32, (m.pos.y + 1.0) as i32) {
-                            m.vel.y = -300.0; // 跳过障碍
+                    if world.solid_px(nx as i32, m.pos.y as i32) {
+                        let wall = (0..48)
+                            .take_while(|&k| {
+                                world.solid_px(nx as i32, (m.pos.y - k as f32) as i32)
+                            })
+                            .count() as i32;
+                        if m.vel.y >= 0.0
+                            && world.solid_px(m.pos.x as i32, (m.pos.y + 1.0) as i32)
+                            && wall <= 16
+                        {
+                            m.vel.y = -300.0; // 跳过矮障碍
                         } else {
                             m.vel.x = -m.vel.x * 0.5;
                             break;
@@ -483,15 +489,19 @@ impl Monsters {
                 let ny = m.pos.y + m.vel.y / 60.0;
                 if world.solid_px(m.pos.x as i32, ny as i32) {
                     m.vel.y = 0.0;
-                    // 台阶 ≤4px 自动上（检查前方与头顶都有空间）
-                    for lift in 1..=4 {
-                        let fx = (m.pos.x + m.vel.x.signum()) as i32;
-                        let fy = (ny - lift as f32) as i32;
-                        if !world.solid_px(fx, fy)
-                            && !world.solid_px(m.pos.x as i32, (m.pos.y - lift as f32) as i32)
-                        {
-                            m.pos.y -= lift as f32;
-                            break;
+                    // 台阶 ≤4px 自动上：抬升后必须真的站在台阶上（脚下实心），
+                    // 否则会在凹凸不平的峭壁上逐帧爬墙（4px/帧 ≈ 240px/s）
+                    if m.vel.x != 0.0 {
+                        for lift in 1..=4 {
+                            let fx = (m.pos.x + m.vel.x.signum() * 2.0) as i32;
+                            let fy = (ny - lift as f32) as i32;
+                            if !world.solid_px(fx, fy)
+                                && !world.solid_px(m.pos.x as i32, (m.pos.y - lift as f32) as i32)
+                                && world.solid_px(fx, fy + 1)
+                            {
+                                m.pos.y -= lift as f32;
+                                break;
+                            }
                         }
                     }
                 } else {

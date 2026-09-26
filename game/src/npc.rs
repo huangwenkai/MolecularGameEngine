@@ -291,9 +291,14 @@ fn walk_towards(n: &mut Npc, speed: f32, world: &mut World, rng: &mut Rng) {
         });
         if ground_ahead {
             n.vel.x = dir * speed;
-            // 撞墙/高台阶 → 跳
+            // 撞墙/高台阶 → 跳（仅矮障碍 ≤10px；高墙不跳，防止沿峭壁反复跳爬）
             if world.solid_px(ahead as i32, n.pos.y as i32) {
-                n.vel.y = JUMP;
+                let wall = (0..24)
+                    .take_while(|&k| world.solid_px(ahead as i32, (n.pos.y - k as f32) as i32))
+                    .count() as i32;
+                if wall <= 10 {
+                    n.vel.y = JUMP;
+                }
             }
         } else {
             n.vel.x = 0.0;
@@ -302,12 +307,19 @@ fn walk_towards(n: &mut Npc, speed: f32, world: &mut World, rng: &mut Rng) {
         n.vel.x = n.vel.x * 0.9;
     }
     let _ = rng;
-    // X 移动 + 碰撞
+    // X 移动 + 碰撞（被挡且是矮障碍 → 跳；高墙停步）
     let nx = n.pos.x + n.vel.x / 60.0;
     if !world.solid_px(nx as i32, n.pos.y as i32) && !world.solid_px(nx as i32, (n.pos.y - 10.0) as i32) {
         n.pos.x = nx;
     } else if grounded {
-        n.vel.y = JUMP;
+        let wall = (0..24)
+            .take_while(|&k| world.solid_px(nx as i32, (n.pos.y - k as f32) as i32))
+            .count() as i32;
+        if wall <= 10 {
+            n.vel.y = JUMP;
+        } else {
+            n.vel.x = 0.0;
+        }
     }
     // Y 移动 + 碰撞
     let ny = n.pos.y + n.vel.y / 60.0;
