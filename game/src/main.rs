@@ -18,6 +18,7 @@ mod projectiles;
 mod save;
 mod selftest;
 mod settings;
+mod skills;
 mod tools;
 mod vfx;
 
@@ -80,6 +81,13 @@ pub struct GameApp {
     pub settings_ui: settings::SettingsUi,
     /// 屏幕提示（文字, 剩余秒数）——背包满等一次性提醒
     pub hint: (String, f32),
+    /// 主动技能（学习/冷却/施放，M17）
+    pub skills: skills::Skills,
+    /// notify 文件监听（保活；drop 即停止监听）
+    #[allow(dead_code)] // 仅保活，事件经 fs_events 通道消费
+    fs_watcher: Option<notify::RecommendedWatcher>,
+    /// 文件变更事件接收端（tick 消费 → 立即热重载检查）
+    fs_events: Option<std::sync::mpsc::Receiver<()>>,
     /// egui 中文字体是否已注入
     fonts_done: bool,
 }
@@ -108,6 +116,7 @@ impl GameApp {
         tracing::info!("new: audio ok");
         let settings = settings::Settings::load();
         audio.set_volume(settings.volume);
+        let (fs_watcher, fs_events) = editor::spawn_watcher();
         Self {
             world,
             player,
@@ -140,6 +149,9 @@ impl GameApp {
             settings,
             veg,
             skin: character::load(),
+            skills: skills::Skills::default(),
+            fs_watcher,
+            fs_events,
             settings_ui: settings::SettingsUi::default(),
             hint: (String::new(), 0.0),
             fonts_done: false,
@@ -315,7 +327,19 @@ impl App for GameApp {
                 ctx.camera.add_shake(shake);
             }
         }
-        if self.tick_count % 30 == 0 && editor::reload_if_changed(self) {
+        // 文件监听热重载：notify 事件 → 立即检查；无事件时 0.5s mtime 轮询兜底
+        let fs_dirty = self
+            .fs_events
+            .as_ref()
+            .map(|rx| {
+                let mut dirty = false;
+                while rx.try_recv().is_ok() {
+                    dirty = true;
+                }
+                dirty
+            })
+            .unwrap_or(false);
+        if (fs_dirty || self.tick_count % 30 == 0) && editor::reload_if_changed(self) {
             // 材质表重载 → 重建调色板纹理
             let pal = art::palette(&self.world.mats);
             ctx.renderer.set_palette(&pal);
@@ -418,6 +442,9 @@ impl App for GameApp {
                 tracing::error!("读档失败: {e}");
             }
         }
+
+        // ---- 主动技能（Z/X/C，M17）----
+        skills::tick(self, ctx);
 
         // ---- 玩家 ----
         let shake_player =
@@ -646,7 +673,7 @@ impl App for GameApp {
                 (
                     (p.pos.x as i32) / LIGHT_CELL,
                     (p.pos.y as i32 - 4) / LIGHT_CELL,
-                    112u8,
+                    170u8,
                 )
             })
             .collect();
@@ -678,6 +705,7 @@ impl App for GameApp {
             self.drops.spawn_loot(loot, mpos, &mut self.rng);
             let ups = self.inv.gain_xp(mxp);
             if ups > 0 {
+                self.skills.pts += ups as u8; // 每级 1 技能点（M17）
                 self.audio.play(audio::Sfx::LevelUp);
                 for _ in 0..24 {
                     let a = self.rng.range_f32(0.0, 6.28);
@@ -698,8 +726,9 @@ impl App for GameApp {
         let night = self.world.time > 0.58 && self.world.time < 0.95;
         self.npcs.update(&mut self.world, night, &mut self.rng);
 
-        // ---- BGM 昼夜调度 ----
+        // ---- BGM 昼夜调度 + 环境音（M17）----
         self.audio.tick(night);
+        self.audio.tick_ambient(night);
 
         // ---- VFX 步进 ----
         self.vfx.update(1.0 / 60.0);
@@ -802,6 +831,7 @@ impl App for GameApp {
             self.monsters.draw_boss_bar(egui);
             editor::draw(self, egui);
             inventory::draw(self, egui);
+            skills::draw_hud(self, egui);
             let snap = debug::DbgSnapshot::of(self);
             self.dbg.draw(&snap, egui);
             self.settings_ui
@@ -938,7 +968,7 @@ fn main() {
     if args.iter().any(|a| a == "--selftest") {
         tracing::info!("selftest mode");
         let mut app = GameApp::new(2026_0924, true);
-        engine.run_headless(&mut app, 1250);
+        engine.run_headless(&mut app, 1350);
         tracing::info!("selftest done");
     } else {
         let seed = std::time::SystemTime::now()

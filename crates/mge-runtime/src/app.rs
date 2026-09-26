@@ -36,6 +36,8 @@ pub struct EngineCtx<'a> {
     pub ambient: f32,
     /// Bloom 辉光强度（0 关闭，默认 0.45）
     pub bloom: f32,
+    /// 曝光系数（ACES 色调映射，默认 1.0）
+    pub exposure: f32,
     /// 窗口模式下的 egui 上下文（App::render 中构建 UI 面板；无头模式为 None）
     pub egui: Option<&'a egui::Context>,
     screenshot_req: Option<String>,
@@ -109,6 +111,7 @@ impl Engine {
             sky_color: [0.5, 0.7, 0.9],
             ambient: 1.0,
             bloom: 0.45,
+            exposure: 1.0,
             egui: None,
             screenshot_req: None,
         }
@@ -191,7 +194,8 @@ impl Engine {
         let mut ctx = self.ctx();
         ctx.egui = ectx.as_ref().map(|c| c as &egui::Context);
         app.render(&mut ctx);
-        let (sky, amb, ctx_bloom) = (ctx.sky_color, ctx.ambient, ctx.bloom);
+        let (sky, amb, ctx_bloom, ctx_exposure) =
+            (ctx.sky_color, ctx.ambient, ctx.bloom, ctx.exposure);
         drop(ctx);
 
         // ---- egui：结束 pass → UI 网格 ----
@@ -223,6 +227,7 @@ impl Engine {
                     sky_color: sky,
                     ambient: amb,
                     bloom: ctx_bloom,
+                    exposure: ctx_exposure,
                 },
                 &self.atlas_batch.verts,
                 &self.world_batch.verts,
@@ -270,6 +275,7 @@ impl Engine {
                     sky_color: sky,
                     ambient: amb,
                     bloom: ctx_bloom,
+                    exposure: ctx_exposure,
                 },
                 &self.atlas_batch.verts,
                 &self.world_batch.verts,

@@ -754,6 +754,56 @@ pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
                 game.ecs.len(),
             );
         }
+        // ---- M17：技能系统（学习 → 施放 → 冷却 → 存档）----
+        1250 => {
+            game.skills.pts = 3;
+            for i in 0..3 {
+                game.skills.learn(i);
+            }
+            game.player.hp = 20.0; // 供治疗术验证
+            game.settings.slot = 2; // 存档位 2
+        }
+        1252 => {
+            input.inject(Action::Skill3, PRESS); // 治疗术
+        }
+        1253 => {
+            input.inject(Action::Skill3, RELEASE);
+        }
+        1256 => {
+            let healed = game.player.hp > 20.0 && game.player.hp <= game.player.max_hp;
+            let cd_on = game.skills.cd_remaining(2) > 0.0;
+            input.inject(Action::Skill1, PRESS); // 旋风斩
+            println!(
+                "[SELFTEST] skill heal {} | hp {:.0} cd {:.1}",
+                if healed && cd_on { "PASS" } else { "FAIL" },
+                game.player.hp,
+                game.skills.cd_remaining(2),
+            );
+        }
+        1257 => {
+            input.inject(Action::Skill1, RELEASE);
+        }
+        1260 => {
+            let cd_on = game.skills.cd_remaining(0) > 0.0;
+            println!(
+                "[SELFTEST] skill whirlwind {} | cd {:.1}",
+                if cd_on { "PASS" } else { "FAIL" },
+                game.skills.cd_remaining(0),
+            );
+            // 存档位 2：保存 → 清空技能 → 读档还原
+            let save_ok = save::save_game(game).is_ok();
+            let file_ok = std::path::Path::new("saves/save2.ron").exists()
+                && std::path::Path::new("saves/save2.px").exists();
+            game.skills.learned = [0, 0, 0];
+            game.skills.pts = 0;
+            let load_ok = save::load_game(game).is_ok();
+            let restored = game.skills.learned == [1, 1, 1];
+            println!(
+                "[SELFTEST] save slot2 {} | file {file_ok} restored {restored}",
+                if save_ok && load_ok { "PASS" } else { "FAIL" },
+            );
+            game.settings.slot = 1;
+        }
         _ => {}
     }
 }

@@ -18,13 +18,20 @@ pub struct Settings {
     pub volume: f32,
     /// 震屏强度倍率 0~2（0 = 关闭震动）
     pub shake: f32,
+    /// 当前存档位 1~3（F5/F9 快存快读作用于该存档位）
+    #[serde(default = "default_slot")]
+    pub slot: u8,
     /// 键位覆盖项 (动作名, 键名)
     pub bindings: Vec<(String, String)>,
 }
 
+fn default_slot() -> u8 {
+    1
+}
+
 impl Default for Settings {
     fn default() -> Self {
-        Self { volume: 0.8, shake: 1.0, bindings: Vec::new() }
+        Self { volume: 0.8, shake: 1.0, slot: 1, bindings: Vec::new() }
     }
 }
 
@@ -93,6 +100,9 @@ pub fn action_name(a: Action) -> &'static str {
         Action::Potion => "potion",
         Action::QuickSave => "save",
         Action::QuickLoad => "load",
+        Action::Skill1 => "skill1",
+        Action::Skill2 => "skill2",
+        Action::Skill3 => "skill3",
     }
 }
 
@@ -119,6 +129,9 @@ pub fn action_from_name(s: &str) -> Option<Action> {
         "potion" => Action::Potion,
         "save" => Action::QuickSave,
         "load" => Action::QuickLoad,
+        "skill1" => Action::Skill1,
+        "skill2" => Action::Skill2,
+        "skill3" => Action::Skill3,
         _ => return None,
     })
 }
@@ -143,6 +156,9 @@ const REBINDABLE: &[Action] = &[
     Action::ToggleEditor,
     Action::QuickSave,
     Action::QuickLoad,
+    Action::Skill1,
+    Action::Skill2,
+    Action::Skill3,
 ];
 
 /// 动作中文名（UI 展示）
@@ -169,6 +185,9 @@ fn action_label(a: Action) -> &'static str {
         Action::ToggleEditor => "特效编辑器",
         Action::QuickSave => "快速存档",
         Action::QuickLoad => "快速读档",
+        Action::Skill1 => "技能 1 · 旋风斩",
+        Action::Skill2 => "技能 2 · 火焰新星",
+        Action::Skill3 => "技能 3 · 治疗术",
     }
 }
 
@@ -256,6 +275,11 @@ impl SettingsUi {
                         );
                         row(ui, "背包", &key_of(map, Action::Inventory));
                         row(ui, "喝药水", &key_of(map, Action::Potion));
+                        row(
+                            ui,
+                            "主动技能（旋风斩 / 火焰新星 / 治疗术）",
+                            &fmt_pair(map, Action::Skill1, Action::Skill3),
+                        );
                         row(ui, "系统设置", &key_of(map, Action::ToggleMenu));
                         row(ui, "调试面板", &key_of(map, Action::ToggleDebug));
                         row(ui, "特效编辑器", &key_of(map, Action::ToggleEditor));
@@ -288,6 +312,23 @@ impl SettingsUi {
                 if shk.drag_stopped() {
                     settings.save();
                 }
+                ui.add_space(6.0);
+
+                // ---- 存档位 ----
+                ui.heading("存档位");
+                ui.separator();
+                ui.horizontal(|ui| {
+                    ui.label("F5/F9 作用的存档位：");
+                    for s in 1..=3u8 {
+                        if ui
+                            .selectable_label(settings.slot == s, format!("存档 {s}"))
+                            .clicked()
+                        {
+                            settings.slot = s;
+                            settings.save();
+                        }
+                    }
+                });
                 ui.add_space(6.0);
 
                 // ---- 按键配置 ----

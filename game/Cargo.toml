@@ -24,3 +24,4 @@ winit = { workspace = true }
 egui = { workspace = true }
 egui-winit = { workspace = true }
 kira = { workspace = true }
+notify = { workspace = true }

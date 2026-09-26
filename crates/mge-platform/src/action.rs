@@ -26,6 +26,12 @@ pub enum Action {
     Potion,
     QuickSave,
     QuickLoad,
+    /// 主动技能 1（旋风斩）
+    Skill1,
+    /// 主动技能 2（火焰新星）
+    Skill2,
+    /// 主动技能 3（治疗术）
+    Skill3,
 }
 
 pub struct ActionMap {
@@ -69,6 +75,9 @@ impl ActionMap {
         put(KeyCode::KeyQ, Action::Potion);
         put(KeyCode::F5, Action::QuickSave);
         put(KeyCode::F9, Action::QuickLoad);
+        put(KeyCode::KeyZ, Action::Skill1);
+        put(KeyCode::KeyX, Action::Skill2);
+        put(KeyCode::KeyC, Action::Skill3);
         Self { keys }
     }
 

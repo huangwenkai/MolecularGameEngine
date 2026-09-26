@@ -12,10 +12,14 @@ use std::collections::{HashMap, VecDeque};
 pub const LIGHT_CELL: i32 = 4;
 
 // 光衰减：空气中每格损耗 / 实心中每格损耗（格 = 4px）
-const COST_AIR: u8 = 9;
+// 传播半径 = 亮度 / COST_AIR：火把 255 → 36 格 ≈ 145px 圆形光斑
+const COST_AIR: u8 = 7;
 const COST_SOLID: u8 = 24;
-/// 区域重算的外扩 margin（≥ 255/COST_AIR = 28.4 格，保证光不会越过 margin 泄漏）
-const REGION_MARGIN: i32 = 34;
+/// 对角衰减（×√2：7→10 / 24→34），8 邻接传播使光斑呈圆形而非菱形
+const COST_DIAG: u8 = 10;
+const COST_SOLID_DIAG: u8 = 34;
+/// 区域重算的外扩 margin（≥ 255/COST_AIR ≈ 36.4 格，保证光不会越过 margin 泄漏）
+const REGION_MARGIN: i32 = 40;
 /// 每帧最多重算的独立区域数（其余留到后续帧）
 const LIGHT_QUOTA: usize = 3;
 /// 脏区积压上限：超过则丢弃最旧的过时区域（安全网会修正）
@@ -245,7 +249,7 @@ impl LightMap {
         torches: &[(i32, i32)],
     ) -> Option<(i32, i32, i32, i32)> {
         // 所有移动光源的联合包围盒
-        const R: i32 = 12; // 微光 48≈6 格、火球 112≈12 格可达，取 12 留余量
+        const R: i32 = 26; // 微光 72≈10 格、火球 170≈24 格可达（COST_AIR=7），取 26 留余量
         let mut b = (self.cw, self.ch, 0, 0); // 反向初始值，任意光源都会收窄
         if let Some((gx, gy)) = self.player_glow {
             b.0 = b.0.min(gx);
@@ -324,9 +328,9 @@ impl LightMap {
                 continue;
             }
             let i = (cy * me.cw + cx) as usize;
-            if me.block[i] < 224 {
-                me.block[i] = 224;
-                queue2.push_back(((cy * me.cw + cx) as u32, 224));
+            if me.block[i] < 255 {
+                me.block[i] = 255;
+                queue2.push_back(((cy * me.cw + cx) as u32, 255));
             }
         }
         for ((px, py), v) in &me.emissive {
@@ -334,7 +338,7 @@ impl LightMap {
             if cx < ix0 || cx > ix1 || cy < iy0 || cy > iy1 {
                 continue;
             }
-            let v = (*v as u8).min(255).max(120);
+            let v = (*v as u8).min(255).max(160);
             let i = (cy * me.cw + cx) as usize;
             if me.block[i] < v {
                 me.block[i] = v;
@@ -344,9 +348,9 @@ impl LightMap {
         if let Some((gx, gy)) = me.player_glow {
             if cx_ok(gx, ix0, ix1) && cx_ok(gy, iy0, iy1) {
                 let i = (gy * me.cw + gx) as usize;
-                if me.block[i] < 48 {
-                    me.block[i] = 48;
-                    queue2.push_back(((gy * me.cw + gx) as u32, 48));
+                if me.block[i] < 72 {
+                    me.block[i] = 72;
+                    queue2.push_back(((gy * me.cw + gx) as u32, 72));
                 }
             }
         }
@@ -391,6 +395,20 @@ impl LightMap {
     }
 }
 
+/// 8 邻接方向与对应衰减（正交 / 对角）——等距面为圆形
+const NEIGH: [(i32, i32, u8, u8); 8] = [
+    (-1, 0, COST_AIR, COST_SOLID),
+    (1, 0, COST_AIR, COST_SOLID),
+    (0, -1, COST_AIR, COST_SOLID),
+    (0, 1, COST_AIR, COST_SOLID),
+    (-1, -1, COST_DIAG, COST_SOLID_DIAG),
+    (1, -1, COST_DIAG, COST_SOLID_DIAG),
+    (-1, 1, COST_DIAG, COST_SOLID_DIAG),
+    (1, 1, COST_DIAG, COST_SOLID_DIAG),
+];
+
+/// 光传播：8 邻接 + 两档边权 → 按亮度降序的桶式 Dijkstra（等距面为圆形）。
+/// 入队 seeds（值, 格索引）；同层处理期间只可能写入更低的桶，降序遍历即正确。
 fn bfs_fill(
     map: &mut [u8],
     queue: &mut VecDeque<(u32, u8)>,
@@ -399,23 +417,33 @@ fn bfs_fill(
     bounds: (i32, i32, i32, i32),
 ) {
     let (bx0, by0, bx1, by1) = bounds;
+    let mut buckets: Vec<Vec<u32>> = vec![Vec::new(); 256];
     while let Some((idx, v)) = queue.pop_front() {
-        let x = idx as i32 % cw;
-        let y = idx as i32 / cw;
-        if v <= COST_AIR {
+        buckets[v as usize].push(idx);
+    }
+    for v in (1..=255u8).rev() {
+        let level = v as usize;
+        if buckets[level].is_empty() {
             continue;
         }
-        for (dx, dy) in [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
-            let nx = x + dx;
-            let ny = y + dy;
-            if nx < bx0 || ny < by0 || nx > bx1 || ny > by1 {
-                continue;
-            }
-            let ni = (ny * cw + nx) as usize;
-            let nv = v.saturating_sub(if opaque(nx, ny) { COST_SOLID } else { COST_AIR });
-            if nv > map[ni] {
-                map[ni] = nv;
-                queue.push_back(((ny * cw + nx) as u32, nv));
+        let cur = std::mem::take(&mut buckets[level]);
+        for idx in cur {
+            let x = idx as i32 % cw;
+            let y = idx as i32 / cw;
+            for &(dx, dy, ca, cs) in &NEIGH {
+                let nx = x + dx;
+                let ny = y + dy;
+                if nx < bx0 || ny < by0 || nx > bx1 || ny > by1 {
+                    continue;
+                }
+                let ni = (ny * cw + nx) as usize;
+                let nv = v.saturating_sub(if opaque(nx, ny) { cs } else { ca });
+                if nv > map[ni] {
+                    map[ni] = nv;
+                    if nv > 0 {
+                        buckets[nv as usize].push(ni as u32);
+                    }
+                }
             }
         }
     }

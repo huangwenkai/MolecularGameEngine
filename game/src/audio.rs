@@ -31,6 +31,10 @@ pub struct Audio {
     bgm_is_night: bool,
     bgm_day: Option<StaticSoundData>,
     bgm_night: Option<StaticSoundData>,
+    amb_handle: Option<StaticSoundHandle>,
+    amb_is_night: bool,
+    amb_day: Option<StaticSoundData>,
+    amb_night: Option<StaticSoundData>,
     /// 主音量 0~1
     pub volume: f32,
 }
@@ -71,6 +75,10 @@ impl Audio {
             bgm_is_night: false,
             bgm_day: has_audio.then(bgm_day),
             bgm_night: has_audio.then(bgm_night),
+            amb_handle: None,
+            amb_is_night: false,
+            amb_day: has_audio.then(amb_day),
+            amb_night: has_audio.then(amb_night),
             volume: 1.0,
         }
     }
@@ -94,9 +102,32 @@ impl Audio {
 
     pub fn set_volume(&mut self, v: f32) {
         self.volume = v.clamp(0.0, 1.0);
-        // 正在播放的 BGM 实时跟随音量
+        // 正在播放的 BGM / 环境音实时跟随音量
         if let Some(h) = &mut self.bgm_handle {
             let _ = h.set_volume(self.volume * 0.45, kira::Tween::default());
+        }
+        if let Some(h) = &mut self.amb_handle {
+            let _ = h.set_volume(self.volume * 0.22, kira::Tween::default());
+        }
+    }
+
+    /// 环境音调度：每 tick 调用；曲子播完或昼夜切换时换曲（音量低于 BGM）
+    pub fn tick_ambient(&mut self, night: bool) {
+        let Some(m) = &mut self.manager else { return };
+        let done = self
+            .amb_handle
+            .as_ref()
+            .map(|h| h.state() == PlaybackState::Stopped)
+            .unwrap_or(true);
+        if !done && night == self.amb_is_night {
+            return;
+        }
+        let data = if night { &self.amb_night } else { &self.amb_day };
+        let Some(data) = data else { return };
+        let d = data.clone().volume(0.22 * self.volume);
+        if let Ok(h) = m.play(d) {
+            self.amb_handle = Some(h);
+            self.amb_is_night = night;
         }
     }
 
@@ -307,4 +338,66 @@ fn bgm_night() -> StaticSoundData {
     }
     notes.extend(wind);
     render_notes(&notes, per * 8.0)
+}
+
+// ---- 程序化环境音（20s 循环，与 BGM 并行播放）----
+
+/// 确定性伪随机（环境音生成用）
+fn amb_rnd(seed: &mut u64) -> f32 {
+    *seed = seed
+        .wrapping_mul(6364136223846793005)
+        .wrapping_add(1442695040888963407);
+    (*seed >> 33) as f32 / u32::MAX as f32
+}
+
+/// 白天环境：鸟鸣（短促扫频啁啾成串）+ 微风低频底噪
+fn amb_day() -> StaticSoundData {
+    let mut notes = Vec::new();
+    let mut seed = 0x5EED_B16D_C0FFEEu64;
+    for _ in 0..24 {
+        let t0 = amb_rnd(&mut seed) * 18.0;
+        let base = 2200.0 + amb_rnd(&mut seed) * 1800.0;
+        let n_chirp = 2 + (amb_rnd(&mut seed) * 3.0) as usize;
+        for c in 0..n_chirp {
+            notes.push(Note {
+                t: t0 + c as f32 * 0.09,
+                dur: 0.07,
+                freq: base + amb_rnd(&mut seed) * 400.0,
+                amp: 0.045,
+                wave: wave_sine,
+            });
+        }
+    }
+    for i in 0..30 {
+        notes.push(Note {
+            t: i as f32 * 0.66,
+            dur: 1.4,
+            freq: 90.0 + (i as f32).sin() * 20.0,
+            amp: 0.012,
+            wave: wave_sine,
+        });
+    }
+    render_notes(&notes, 20.0)
+}
+
+/// 夜晚环境：蟋蟀（4kHz 短脉冲成串）+ 猫头鹰低鸣
+fn amb_night() -> StaticSoundData {
+    let mut notes = Vec::new();
+    for i in 0..80 {
+        let t0 = i as f32 * 0.25;
+        for k in 0..3 {
+            notes.push(Note {
+                t: t0 + k as f32 * 0.03,
+                dur: 0.025,
+                freq: 4200.0,
+                amp: 0.025,
+                wave: wave_square,
+            });
+        }
+    }
+    for t0 in [4.0f32, 12.5] {
+        notes.push(Note { t: t0, dur: 0.4, freq: 320.0, amp: 0.05, wave: wave_sine });
+        notes.push(Note { t: t0 + 0.5, dur: 0.5, freq: 260.0, amp: 0.05, wave: wave_sine });
+    }
+    render_notes(&notes, 20.0)
 }

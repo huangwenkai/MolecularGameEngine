@@ -22,6 +22,8 @@ pub struct FrameParams<'a> {
     pub ambient: f32,
     /// Bloom 强度（0 = 关闭）
     pub bloom: f32,
+    /// 曝光系数（composite 色调映射用，默认 1.0）
+    pub exposure: f32,
 }
 
 pub struct Renderer {
@@ -881,11 +883,11 @@ impl Renderer {
             1.0 / ww.max(1) as f32,
             1.0 / wh.max(1) as f32,
             p.ambient,
+            0.0, // _pad 前对齐
+            p.exposure, // _pad.x：曝光（ACES 色调映射）
             0.0,
             0.0,
-            0.0,
-            0.0,
-            p.bloom,
+            p.bloom, // _pad.w：Bloom 强度
         ];
         self.queue.write_buffer(&self.comp_buf, 0, bytemuck::cast_slice(&comp));
 

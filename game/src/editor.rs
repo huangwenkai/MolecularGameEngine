@@ -3,6 +3,7 @@
 use crate::vfx::{Blueprint, Emitter};
 use crate::GameApp;
 use egui::ComboBox;
+use notify::Watcher;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -19,6 +20,45 @@ const SHADERS: &[(&str, mge_render::renderer::ShaderKind)] = &[
     ("composite.wgsl", mge_render::renderer::ShaderKind::Composite),
     ("bloom.wgsl", mge_render::renderer::ShaderKind::Bloom),
 ];
+
+/// 启动文件监听（notify）：监视数据表与着色器目录，任何变更经通道通知 tick
+/// 立即执行热重载检查（替代纯 0.5s mtime 轮询；轮询保留作兜底）。
+/// 返回 (watcher, receiver)：watcher 必须保活（drop 即停止监听）。
+pub fn spawn_watcher() -> (
+    Option<notify::RecommendedWatcher>,
+    Option<std::sync::mpsc::Receiver<()>>,
+) {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let mut watcher = match notify::recommended_watcher(
+        move |res: Result<notify::Event, notify::Error>| {
+            if res.is_ok() {
+                // 只发信号不做 IO，重载仍由主线程 mtime 校验驱动
+                let _ = tx.send(());
+            }
+        },
+    ) {
+        Ok(w) => w,
+        Err(e) => {
+            tracing::warn!("文件监听不可用，退回 mtime 轮询: {e}");
+            return (None, None);
+        }
+    };
+    // 三个监视目录：引擎数据表（materials/vegetation）、游戏数据表（vfx/weapons/animations）、着色器
+    let dirs = [
+        std::path::Path::new(MATERIALS_PATH)
+            .parent()
+            .map(|p| p.to_path_buf()),
+        std::path::Path::new(VFX_PATH).parent().map(|p| p.to_path_buf()),
+        Some(std::path::PathBuf::from(SHADERS_DIR)),
+    ];
+    for d in dirs.into_iter().flatten() {
+        if let Err(e) = watcher.watch(&d, notify::RecursiveMode::NonRecursive) {
+            tracing::warn!("watch {d:?} 失败: {e}");
+        }
+    }
+    tracing::info!("文件监听热重载已启动（notify，3 目录）");
+    (Some(watcher), Some(rx))
+}
 
 /// 武器 → 特效蓝图名映射（数据驱动，热重载）
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -96,6 +136,14 @@ pub struct VfxEditor {
     pub char_erase: bool,
     /// 待上传图集的部件（tick 中消费：需要 renderer）
     pub char_dirty: Vec<&'static str>,
+    /// 画布缩放（每像素格边长 px；<=0 视为默认 26）
+    pub char_zoom: f32,
+    /// 撤销栈（部件序号 + 编辑前快照），笔画级
+    pub char_undo: Vec<(usize, image::RgbaImage)>,
+    /// 重做栈
+    pub char_redo: Vec<(usize, image::RgbaImage)>,
+    /// 正在进行的笔画（拖拽全程只压一次快照）
+    pub char_stroke: bool,
 }
 
 /// 读取武器映射（文件缺失/损坏时用默认）
@@ -798,7 +846,10 @@ fn tab_char(ui: &mut egui::Ui, app: &mut GameApp) {
         }
     });
     let def = &crate::character::PARTS[app.editor.char_sel];
-    ui.label(format!("{}（{}×{} 像素，左键涂色 / 右键擦除）", def.label, def.w, def.h));
+    ui.label(format!(
+        "{}（{}×{} 像素，左键涂色 / 右键擦除 / 中键取色）",
+        def.label, def.w, def.h
+    ));
     ui.separator();
 
     // 画笔颜色 + 快捷色板
@@ -828,8 +879,30 @@ fn tab_char(ui: &mut egui::Ui, app: &mut GameApp) {
         }
     });
 
+    // 画布缩放 + 撤销/重做
+    let mut zoom = if app.editor.char_zoom <= 0.0 { 26.0 } else { app.editor.char_zoom };
+    ui.horizontal(|ui| {
+        let zr = ui.add(egui::Slider::new(&mut zoom, 8.0..=48.0).text("画布缩放"));
+        if zr.changed() {
+            app.editor.char_zoom = zoom;
+        }
+        if ui.button("↶ 撤销 (Ctrl+Z)").clicked() {
+            char_undo(app);
+        }
+        if ui.button("↷ 重做 (Ctrl+Y)").clicked() {
+            char_redo(app);
+        }
+    });
+    if ui.ctx().input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::Z)) {
+        char_undo(app);
+    }
+    if ui.ctx().input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::Y)) {
+        char_redo(app);
+    }
+
     // 逐像素画布（可变借用作用域内完成绘制与重置）
-    let cell = 26.0;
+    let cell = zoom;
+    let mut interacted = false;
     {
         let Some(pt) = app.skin.get_mut(def.key) else { return; };
         egui::Grid::new("char_canvas")
@@ -848,11 +921,33 @@ fn tab_char(ui: &mut egui::Ui, app: &mut GameApp) {
                             .allocate_response(egui::vec2(cell, cell), egui::Sense::click_and_drag());
                         ui.painter().rect_filled(resp.rect, 3.0, shown);
                         ui.painter().rect_filled(resp.rect.shrink(1.0), 2.0, shown);
-                        let erase = app.editor.char_erase
+                        let lmb = resp.dragged_by(egui::PointerButton::Primary)
+                            || resp.clicked();
+                        // 擦除：擦除模式下左键，或任意模式右键（必须伴随指针交互，防止开启擦除模式瞬间清空整图）
+                        let erase = (app.editor.char_erase && lmb)
                             || resp.dragged_by(egui::PointerButton::Secondary)
                             || resp.secondary_clicked();
-                        let paint = !erase
-                            && (resp.dragged_by(egui::PointerButton::Primary) || resp.clicked());
+                        let paint = !erase && lmb;
+                        // 中键取色
+                        if resp.clicked_by(egui::PointerButton::Middle) && a != 0 {
+                            app.editor.char_color =
+                                [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0];
+                            app.editor.char_erase = false;
+                        }
+                        // 笔画开始：压入一次撤销快照（拖拽全程只压一次）
+                        if (paint || erase) && !app.editor.char_stroke {
+                            app.editor
+                                .char_undo
+                                .push((app.editor.char_sel, pt.img.clone()));
+                            if app.editor.char_undo.len() > 40 {
+                                app.editor.char_undo.remove(0);
+                            }
+                            app.editor.char_redo.clear();
+                            app.editor.char_stroke = true;
+                        }
+                        if paint || erase {
+                            interacted = true;
+                        }
                         if paint {
                             let c = app.editor.char_color;
                             pt.img.put_pixel(
@@ -875,8 +970,19 @@ fn tab_char(ui: &mut egui::Ui, app: &mut GameApp) {
                 }
             });
         if ui.button("↺ 重置此部件").clicked() {
+            // 重置可撤销：先压快照
+            let snap = pt.img.clone();
             crate::character::reset_part(pt);
+            app.editor.char_undo.push((app.editor.char_sel, snap));
+            if app.editor.char_undo.len() > 40 {
+                app.editor.char_undo.remove(0);
+            }
+            app.editor.char_redo.clear();
             app.editor.char_dirty.push(def.key);
+        }
+        // 无指针交互的帧视为笔画结束
+        if !interacted {
+            app.editor.char_stroke = false;
         }
     }
 
@@ -896,4 +1002,30 @@ fn tab_char(ui: &mut egui::Ui, app: &mut GameApp) {
         }
     });
     ui.small("形象实时生效（程序化动画保留）；保存后下次启动自动加载 assets/character/*.png。");
+}
+
+/// 人物编辑：撤销上一次笔画/重置（Ctrl+Z）
+fn char_undo(app: &mut GameApp) {
+    let Some((part, snap)) = app.editor.char_undo.pop() else { return };
+    let key = crate::character::PARTS[part].key;
+    if let Some(pt) = app.skin.get_mut(key) {
+        let cur = pt.img.clone();
+        pt.img = snap;
+        app.editor.char_redo.push((part, cur));
+        app.editor.char_stroke = false;
+    }
+    app.editor.char_dirty.push(key);
+}
+
+/// 人物编辑：重做（Ctrl+Y）
+fn char_redo(app: &mut GameApp) {
+    let Some((part, snap)) = app.editor.char_redo.pop() else { return };
+    let key = crate::character::PARTS[part].key;
+    if let Some(pt) = app.skin.get_mut(key) {
+        let cur = pt.img.clone();
+        pt.img = snap;
+        app.editor.char_undo.push((part, cur));
+        app.editor.char_stroke = false;
+    }
+    app.editor.char_dirty.push(key);
 }

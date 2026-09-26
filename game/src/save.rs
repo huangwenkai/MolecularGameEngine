@@ -13,6 +13,9 @@ struct Meta {
     inv: InvData,
     time: f32,
     torches: Vec<(i32, i32)>,
+    /// 技能（M17 新增；serde(default) 兼容旧存档）
+    #[serde(default)]
+    skills: crate::skills::SkillSave,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -34,15 +37,19 @@ struct InvData {
     attr: crate::inventory::Attr,
 }
 
-fn save_paths() -> (PathBuf, PathBuf) {
+fn save_paths(slot: u8) -> (PathBuf, PathBuf) {
+    let slot = match slot {
+        s @ 1..=3 => s,
+        _ => 1,
+    };
     let dir = PathBuf::from(SAVE_DIR);
-    (dir.join("save1.ron"), dir.join("save1.px"))
+    (dir.join(format!("save{slot}.ron")), dir.join(format!("save{slot}.px")))
 }
 
 /// F5：保存（世界 RLE + 元数据）
 pub fn save_game(app: &mut GameApp) -> std::io::Result<()> {
     std::fs::create_dir_all(SAVE_DIR)?;
-    let (meta_path, px_path) = save_paths();
+    let (meta_path, px_path) = save_paths(app.settings.slot);
 
     // ---- 世界像素 RLE：[mat][shade][count u16 LE] ----
     let raw = app.world.pixels.export_mat_shade();
@@ -80,6 +87,10 @@ pub fn save_game(app: &mut GameApp) -> std::io::Result<()> {
         },
         time: app.world.time,
         torches: app.world.torches.clone(),
+        skills: crate::skills::SkillSave {
+            pts: app.skills.pts,
+            learned: app.skills.learned,
+        },
     };
 
     // 写入（先临时文件再改名，防半写）
@@ -104,7 +115,7 @@ pub fn save_game(app: &mut GameApp) -> std::io::Result<()> {
 
 /// F9：读档
 pub fn load_game(app: &mut GameApp) -> std::io::Result<()> {
-    let (meta_path, px_path) = save_paths();
+    let (meta_path, px_path) = save_paths(app.settings.slot);
     let text = std::fs::read_to_string(&meta_path)?;
     let meta: Meta = ron::from_str(&text)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
@@ -145,6 +156,8 @@ pub fn load_game(app: &mut GameApp) -> std::io::Result<()> {
     app.inv.attr = meta.inv.attr;
     app.world.time = meta.time;
     app.world.torches = meta.torches;
+    app.skills.pts = meta.skills.pts;
+    app.skills.learned = meta.skills.learned;
     // 怪物/掉落为动态实体，不存档
     app.monsters.list.clear();
     app.monsters.bullets.clear();

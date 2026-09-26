@@ -294,11 +294,11 @@ impl World {
         self.events.send(WorldEvent::Explosion { x: cx as f32, y: cy as f32 });
     }
 
-    /// 昼夜环境光系数（0.16 夜 — 1.0 昼）
+    /// 昼夜环境光系数（0.24 夜 — 1.0 昼）
     pub fn ambient(&self) -> f32 {
         let t = self.time;
         let day = smooth(0.02, 0.10, t) * (1.0 - smooth(0.48, 0.58, t));
-        0.16 + 0.84 * day
+        0.24 + 0.76 * day
     }
 
     /// 天空颜色（随时间渐变）

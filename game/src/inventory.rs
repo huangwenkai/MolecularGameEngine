@@ -265,6 +265,35 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
         ));
         ui.separator();
 
+        // ---- 技能（M17：升级每级 1 技能点，学习/升级消耗）----
+        ui.heading("技能");
+        if app.skills.pts > 0 {
+            ui.colored_label(Color32::GOLD, format!("可用技能点 {}（每升 1 级获得 1 点）", app.skills.pts));
+        }
+        for (i, def) in crate::skills::SKILLS.iter().enumerate() {
+            ui.horizontal(|ui| {
+                let lv = app.skills.learned[i];
+                ui.monospace(format!("[{}] {}{}", def.key_hint, def.name, if lv > 0 { format!(" Lv.{lv}") } else { String::new() }));
+                if lv == 0 {
+                    ui.add_enabled_ui(app.skills.pts > 0, |ui| {
+                        if ui.button("学习").clicked() {
+                            app.skills.learn(i);
+                        }
+                    });
+                } else if lv < crate::skills::SKILL_MAX_LV {
+                    ui.add_enabled_ui(app.skills.pts > 0, |ui| {
+                        if ui.button("升级").clicked() {
+                            app.skills.learn(i);
+                        }
+                    });
+                } else {
+                    ui.weak("MAX");
+                }
+                ui.small(def.desc);
+            });
+        }
+        ui.separator();
+
         // ---- 装备槽 ----
         ui.label("装备（点击卸下）");
         ui.horizontal(|ui| {
