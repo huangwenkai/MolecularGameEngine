@@ -6,6 +6,7 @@
 //! - 火/岩浆/酸为反应性材质，休眠块中的特殊材质仍低频反应
 use crate::materials::{Kind, MaterialDef, MaterialId, Materials, Special, EMPTY, OOB};
 use mge_core::rng::Rng;
+use std::collections::HashSet;
 
 pub const CHUNK_PX: usize = 128;
 const NB4: [(i32, i32); 4] = [(0, -1), (0, 1), (-1, 0), (1, 0)];
@@ -90,6 +91,12 @@ impl SimIds {
         }
     }
 }
+
+/// 悬浮检测：静态像素失去支撑后，其连通区域 ≤ 此像素数 → 整块转为碎屑下落
+/// （更大的区域视为锚定地形，不处理；区域洪泛的上限同此值）
+const MAX_FLOATER_PX: usize = 512;
+/// 单次 resolve 最多处理的种子数（爆炸等大批清除时限流）
+const MAX_FLOATER_SEEDS: usize = 256;
 
 pub struct PixelWorld {
     pub w: i32,
@@ -509,6 +516,10 @@ impl PixelWorld {
                     Pixel::default()
                 };
                 self.set(x, y, next);
+                // 火/蒸汽消散 = 支撑可能被移除（燃烧掉的地形）→ 悬浮检测
+                if next.mat == EMPTY {
+                    self.resolve_floaters(mats, &[(x, y)]);
+                }
                 return true;
             }
             self.patch(x, y, |q| q.life -= 1);
@@ -589,6 +600,7 @@ impl PixelWorld {
                     // 腐蚀可溶静态像素（酸被消耗）
                     if nd.kind == Kind::Static && !nd.acid_proof && nd.hp > 0 && self.rng.chance(0.25) {
                         self.set(nx, ny, Pixel::default());
+                        self.resolve_floaters(mats, &[(nx, ny)]);
                         self.set(x, y, Pixel { mat: self.ids.smoke, shade: 128, life: mats.def(self.ids.smoke).life, aux: 0 });
                         return;
                     }
@@ -612,10 +624,138 @@ impl PixelWorld {
         let dmg = (p.aux >> 2) as u16 + power;
         if dmg >= def.hp {
             self.set(x, y, Pixel::default());
+            self.resolve_floaters(mats, &[(x, y)]);
             Some(p.mat)
         } else {
             self.patch(x, y, |q| q.aux = ((dmg.min(63) as u8) << 2) | (q.aux & 0b11));
             None
         }
+    }
+
+    /// 悬浮检测：清除点周围的实心静态像素，若其连通区域是无支撑的孤立小块
+    /// （有界洪泛 ≤ MAX_FLOATER_PX，区域内任意像素正下方都不是静态），
+    /// 整块转为各自的 drop 碎屑材质自然下落（无 drop 的像素直接消散）。
+    /// 平台/绳索/火把/树木等非实心静态与背景墙不参与（玩家建筑安全）。
+    pub fn resolve_floaters(&mut self, mats: &Materials, seeds: &[(i32, i32)]) {
+        for &(sx, sy) in seeds.iter().take(MAX_FLOATER_SEEDS) {
+            for (dx, dy) in NB4 {
+                let (x, y) = (sx + dx, sy + dy);
+                if !self.is_solid_static(mats, x, y) {
+                    continue;
+                }
+                // 正下方仍是静态 → 有支撑，不可能是悬浮块
+                let below = self.get(x, y + 1);
+                if below.mat != EMPTY
+                    && below.mat != OOB
+                    && mats.def(below.mat).kind == Kind::Static
+                    && mats.def(below.mat).solid
+                {
+                    continue;
+                }
+                self.collapse_floater_region(x, y, mats);
+            }
+        }
+    }
+
+    #[inline]
+    fn is_solid_static(&self, mats: &Materials, x: i32, y: i32) -> bool {
+        let p = self.get(x, y);
+        if p.mat == EMPTY || p.mat == OOB {
+            return false;
+        }
+        let d = mats.def(p.mat);
+        d.kind == Kind::Static && d.solid
+    }
+
+    /// 从 (sx,sy) 有界洪泛连通实心静态区域；区域超预算视为锚定地形直接放弃，
+    /// 否则整块转为碎屑/清空（附带 shade 保留，唤醒所在 chunk 自然下落堆积）。
+    fn collapse_floater_region(&mut self, sx: i32, sy: i32, mats: &Materials) {
+        let mut region: Vec<(i32, i32)> = Vec::with_capacity(64);
+        let mut seen: HashSet<(i32, i32)> = HashSet::with_capacity(128);
+        let mut stack = vec![(sx, sy)];
+        seen.insert((sx, sy));
+        while let Some((x, y)) = stack.pop() {
+            region.push((x, y));
+            if region.len() > MAX_FLOATER_PX {
+                return; // 大区域 = 锚定地形
+            }
+            for (dx, dy) in NB4 {
+                let (nx, ny) = (x + dx, y + dy);
+                if seen.contains(&(nx, ny)) || !self.is_solid_static(mats, nx, ny) {
+                    continue;
+                }
+                seen.insert((nx, ny));
+                stack.push((nx, ny));
+            }
+        }
+        // 孤立悬浮块 → 物理化
+        for &(x, y) in &region {
+            let p = self.get(x, y);
+            let drop = mats
+                .def(p.mat)
+                .drop
+                .as_ref()
+                .and_then(|d| mats.id(d));
+            match drop {
+                Some(dm) => {
+                    let life = mats.def(dm).life;
+                    self.set(x, y, Pixel { mat: dm, shade: p.shade, life, aux: 0 });
+                }
+                None => self.set(x, y, Pixel::default()),
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn floater_collapses_when_support_mined() {
+        let mats = Materials::embedded();
+        let mut w = PixelWorld::new(42, 512, 256, &mats);
+        let dirt = mats.id("dirt").unwrap();
+        let debris = mats.id("dirt_debris").unwrap();
+        // 平整地面（两层，模拟锚定地形）
+        for x in 0..512 {
+            for y in 128..130 {
+                w.set(x, y, Pixel { mat: dirt, shade: 128, life: 0, aux: 1 });
+            }
+        }
+        // 地面上立一根 3px 土柱
+        for dy in 1..=3 {
+            w.set(100, 128 - dy, Pixel { mat: dirt, shade: 128, life: 0, aux: 1 });
+        }
+        // 挖掉柱子底部的支撑地面 → 土柱应转为碎屑下落
+        let broken = w.mine_px(100, 128, 999, &mats);
+        assert_eq!(broken, Some(dirt));
+        // 柱子 3px 已不再是 dirt（转为 dirt_debris 下落中）
+        for dy in 1..=3 {
+            let p = w.get(100, 128 - dy);
+            assert_ne!(p.mat, dirt, "柱子像素仍为 dirt，未塌落");
+            assert_eq!(p.mat, debris, "应为 dirt_debris");
+        }
+        // 远处锚定地形不受影响
+        assert_eq!(w.get(300, 128).mat, dirt);
+        assert_eq!(w.get(300, 129).mat, dirt);
+    }
+
+    #[test]
+    fn anchored_terrain_stays() {
+        let mats = Materials::embedded();
+        let mut w = PixelWorld::new(42, 512, 256, &mats);
+        let dirt = mats.id("dirt").unwrap();
+        for x in 0..512 {
+            for y in 128..130 {
+                w.set(x, y, Pixel { mat: dirt, shade: 128, life: 0, aux: 1 });
+            }
+        }
+        // 挖掉底行一个像素：周边地形与大地连通（区域 1022px > 512 预算）→ 不塌
+        let broken = w.mine_px(100, 129, 999, &mats);
+        assert_eq!(broken, Some(dirt));
+        assert_eq!(w.get(99, 129).mat, dirt);
+        assert_eq!(w.get(101, 129).mat, dirt);
+        assert_eq!(w.get(100, 128).mat, dirt); // 上方悬空 1px 与大地横向连通，仍锚定
     }
 }

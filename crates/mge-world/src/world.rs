@@ -253,10 +253,11 @@ impl World {
         true
     }
 
-    /// 爆炸：清除半径内地形像素、喷碎屑、点火、烟雾
+    /// 爆炸：清除半径内地形像素、喷碎屑、点火、烟雾 + 悬浮块塌落
     pub fn explode(&mut self, cx: i32, cy: i32, r: i32) {
         let fire = self.pixels.ids.fire;
         let smoke = self.pixels.ids.smoke;
+        let mut seeds: Vec<(i32, i32)> = Vec::new();
         for ty in (cy - r)..=(cy + r) {
             for tx in (cx - r)..=(cx + r) {
                 let dx = tx - cx;
@@ -268,6 +269,7 @@ impl World {
                     let def = self.mats.def(p.mat);
                     if def.kind == Kind::Static && def.hp > 0 {
                         self.pixels.set(tx, ty, Pixel::default());
+                        seeds.push((tx, ty));
                         if let Some(drop) = &def.drop {
                             if let Some(dm) = self.mats.id(drop) {
                                 if self.rng.chance(0.12) {
@@ -279,6 +281,7 @@ impl World {
                 }
             }
         }
+        self.pixels.resolve_floaters(&self.mats, &seeds);
         // 火环与烟
         for _ in 0..(r * 2) {
             let ang = self.rng.range_f32(0.0, std::f32::consts::TAU);
