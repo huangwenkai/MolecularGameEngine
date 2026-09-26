@@ -804,6 +804,52 @@ pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
             );
             game.settings.slot = 1;
         }
+        // ---- M17：NPC/怪物坠坑修复验证 ----
+        1280 => {
+            // NPC：放到地表下方 200px（模拟打碎地块后掉进洞穴）
+            if let Some(n) = game.npcs.list.first_mut() {
+                let sx = n.pos.x as i32;
+                let surf = (0..game.world.pixels.h)
+                    .find(|&y| game.world.solid_px(sx, y))
+                    .unwrap_or(game.world.pixels.h / 2);
+                n.pos.y = (surf + 200) as f32;
+                n.vel = Vec2::ZERO;
+            }
+            // 怪物：把第一只非飞行怪放到远离玩家的深层洞穴（触发深洞清理）
+            let px = game.player.pos.x as i32 + 600;
+            let deep_surf = (0..game.world.pixels.h)
+                .find(|&y| game.world.solid_px(px, y))
+                .unwrap_or(game.world.pixels.h / 2);
+            if let Some(m) = game
+                .monsters
+                .list
+                .iter_mut()
+                .find(|m| m.kind != crate::monsters::Kind::Bat)
+            {
+                m.pos = Vec2::new(px as f32, (deep_surf + 300) as f32);
+                m.vel = Vec2::ZERO;
+            }
+        }
+        1288 => {
+            let npc_ok = game.npcs.list.first_mut().map(|n| {
+                let sx = n.pos.x as i32;
+                let surf = (0..game.world.pixels.h)
+                    .find(|&y| game.world.solid_px(sx, y))
+                    .unwrap_or(game.world.pixels.h / 2);
+                n.pos.y <= (surf + 48) as f32
+            }).unwrap_or(true);
+            let px = game.player.pos.x as i32 + 600;
+            let deep_surf = (0..game.world.pixels.h)
+                .find(|&y| game.world.solid_px(px, y))
+                .unwrap_or(game.world.pixels.h / 2);
+            let monster_ok = !game.monsters.list.iter().any(|m| {
+                (m.pos.x - px as f32).abs() < 1.0 && m.pos.y > (deep_surf + 200) as f32
+            });
+            println!(
+                "[SELFTEST] pit recovery {} | npc_back {npc_ok} monster_cleaned {monster_ok}",
+                if npc_ok && monster_ok { "PASS" } else { "FAIL" },
+            );
+        }
         _ => {}
     }
 }

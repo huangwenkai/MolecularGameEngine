@@ -324,7 +324,7 @@ impl Monsters {
                     let grounded = m.vel.y == 0.0 && world.solid_px(m.pos.x as i32, (m.pos.y + 1.0) as i32);
                     if grounded {
                         let dir = match m.state {
-                            AiState::Chase => m.nav_dir().unwrap_or(to_p.x.signum()),
+                            AiState::Chase => m.nav_dir().unwrap_or_else(|| fallback_dir(to_p)),
                             AiState::Flee => -to_p.x.signum(),
                             AiState::Patrol => {
                                 if m.state_t <= 0.0 {
@@ -356,7 +356,7 @@ impl Monsters {
                     let dir = match m.state {
                         AiState::Chase => {
                             if dist > 240.0 {
-                                m.nav_dir().unwrap_or(to_p.x.signum())
+                                m.nav_dir().unwrap_or_else(|| fallback_dir(to_p))
                             } else if dist < 120.0 {
                                 -to_p.x.signum()
                             } else {
@@ -389,7 +389,7 @@ impl Monsters {
                         m.vel.y = 0.0;
                     }
                     let dir = match m.state {
-                        AiState::Chase => m.nav_dir().unwrap_or(to_p.x.signum()),
+                        AiState::Chase => m.nav_dir().unwrap_or_else(|| fallback_dir(to_p)),
                         AiState::Flee => -to_p.x.signum(),
                         AiState::Patrol => {
                             if m.state_t <= 0.0 {
@@ -483,10 +483,14 @@ impl Monsters {
                 let ny = m.pos.y + m.vel.y / 60.0;
                 if world.solid_px(m.pos.x as i32, ny as i32) {
                     m.vel.y = 0.0;
-                    // 台阶 ≤4px 自动上
+                    // 台阶 ≤4px 自动上（检查前方与头顶都有空间）
                     for lift in 1..=4 {
-                        if !world.solid_px((m.pos.x + m.vel.x.signum()) as i32, (ny - lift as f32) as i32) {
-                            m.pos.y -= lift as f32 * 0.0;
+                        let fx = (m.pos.x + m.vel.x.signum()) as i32;
+                        let fy = (ny - lift as f32) as i32;
+                        if !world.solid_px(fx, fy)
+                            && !world.solid_px(m.pos.x as i32, (m.pos.y - lift as f32) as i32)
+                        {
+                            m.pos.y -= lift as f32;
                             break;
                         }
                     }
@@ -515,6 +519,22 @@ impl Monsters {
                     knock += to_p.normalize_or_zero() * 140.0;
                     m.atk_cd = 0.9;
                 }
+            }
+
+            // ---- 坠入深层洞穴且远离玩家 → 烟雾清理（掉进被打碎地块的怪不再滞留地下）----
+            if m.kind != Kind::Bat
+                && m.pos.y > (surface_y(world, m.pos.x as i32) + 96) as f32
+                && dist > 480.0
+            {
+                if m.boss {
+                    self.boss_alive = false;
+                }
+                for _ in 0..14 {
+                    let fx = (m.pos.x + rng.range_f32(-6.0, 6.0)) as i32;
+                    let fy = (m.pos.y - rng.range_f32(0.0, m.half.y * 2.0)) as i32;
+                    world.pixels.spawn(fx, fy, world.pixels.ids.smoke, &world.mats);
+                }
+                return false; // 无掉落无经验
             }
 
             // ---- 死亡 ----
@@ -668,4 +688,14 @@ fn surface_y(world: &World, x: i32) -> i32 {
         }
     }
     world.pixels.h / 2
+}
+
+/// A* 无路径时的直线回退方向；玩家显著高于自己（自己掉进了坑/洞）→ 停止水平移动，
+/// 避免朝洞壁无限撞墙跳跃（等玩家靠近后再战，深层由清理机制回收）
+fn fallback_dir(to_p: Vec2) -> f32 {
+    if to_p.y < -48.0 {
+        0.0
+    } else {
+        to_p.x.signum()
+    }
 }

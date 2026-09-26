@@ -155,6 +155,16 @@ impl Npcs {
             Self::decide(n, world, night);
             n.state_t += 1;
 
+            // 坠入地下（地块被打碎/天然洞）→ 送回地表，防止在洞穴里永久卡死
+            let surf = surface_y(world, n.pos.x as i32);
+            if n.pos.y > (surf + 48) as f32 {
+                n.pos.y = surf as f32 - 2.0;
+                n.vel = Vec2::ZERO;
+                n.state = NpcState::Idle;
+                n.state_t = 0;
+                n.target = n.pos;
+            }
+
             let at_target = (n.pos - n.target).length() < 14.0;
             match n.state {
                 NpcState::Sleep => {
@@ -228,11 +238,13 @@ impl Npcs {
                     };
                 }
                 NpcState::Work => {
-                    // 找脚下附近矿物/土挖掘（模拟劳动）
+                    // 挖掘"侧前方"矿物/土模拟劳动（不再挖自己脚下——那会挖穿地块让自己坠落）
                     n.thirst = (n.thirst + 0.03).min(100.0);
                     n.hunger = (n.hunger + 0.03).min(100.0);
                     if n.state_t % 45 == 0 {
-                        let (px, py) = (n.pos.x as i32 + rng.range_i32(-6, 6), n.pos.y as i32 + rng.range_i32(4, 10));
+                        let side = if rng.chance(0.5) { 1 } else { -1 };
+                        let px = n.pos.x as i32 + side * rng.range_i32(8, 22);
+                        let py = n.pos.y as i32 + rng.range_i32(-4, 8);
                         if world.solid_px(px, py) {
                             world.mine_px(px, py, 4);
                         }
@@ -272,11 +284,19 @@ fn walk_towards(n: &mut Npc, speed: f32, world: &mut World, rng: &mut Rng) {
     let grounded = world.solid_px(n.pos.x as i32, (n.pos.y + 1.0) as i32) && n.vel.y >= 0.0;
     if grounded {
         n.vel.y = 0.0;
-        n.vel.x = dir * speed;
-        // 撞墙/高台阶 → 跳
+        // 悬崖检测：前方脚下 12px 内无地面 → 停步（防走进被打碎的地块/坑洞）
         let ahead = n.pos.x + dir * 6.0;
-        if world.solid_px(ahead as i32, n.pos.y as i32) {
-            n.vel.y = JUMP;
+        let ground_ahead = (1..=3).any(|k| {
+            world.solid_px(ahead as i32, (n.pos.y + k as f32 * 4.0) as i32)
+        });
+        if ground_ahead {
+            n.vel.x = dir * speed;
+            // 撞墙/高台阶 → 跳
+            if world.solid_px(ahead as i32, n.pos.y as i32) {
+                n.vel.y = JUMP;
+            }
+        } else {
+            n.vel.x = 0.0;
         }
     } else {
         n.vel.x = n.vel.x * 0.9;

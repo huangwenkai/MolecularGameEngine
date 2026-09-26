@@ -14,6 +14,12 @@ fn solid_cell(world: &World, c: Cell) -> bool {
     world.solid_px(c.0 * CELL, c.1 * CELL)
 }
 
+/// 重力可走：格子非实心且脚下 3 格（12px）内有地面（怪物靠重力/跳跃站立行走）。
+/// 向下移动视为坠落无需此检查——防止路径横穿悬空缺口或给出爬不上去的竖井。
+fn grounded_cell(world: &World, c: Cell) -> bool {
+    (1..=3).any(|dy| world.solid_px(c.0 * CELL, (c.1 + dy) * CELL))
+}
+
 #[inline]
 fn key(c: Cell) -> i64 {
     ((c.1 as i64) << 32) | (c.0 as i64 & 0xFFFF_FFFF)
@@ -26,17 +32,24 @@ pub fn find_path(world: &World, start: Vec2, goal: Vec2, window_px: i32) -> Opti
     if s == g {
         return Some(vec![goal]);
     }
-    // 目标格不可走（玩家贴墙等）→ 循环向下找最近可走格（不递归，防栈溢出）
-    if solid_cell(world, g) {
+    // 目标格不可走或悬空（玩家贴墙/跳跃中）→ 向下找最近的"可站立"格
+    // （优先脚下有地面的；深坑上方找不到时兜底取最近空格）
+    if solid_cell(world, g) || !grounded_cell(world, g) {
+        let mut fallback = None;
         let mut found = None;
         for dy in 1..=12i32 {
             let c = (g.0, g.1 + dy);
             if !solid_cell(world, c) {
-                found = Some(c);
-                break;
+                if fallback.is_none() {
+                    fallback = Some(c);
+                }
+                if grounded_cell(world, c) {
+                    found = Some(c);
+                    break;
+                }
             }
         }
-        g = found?;
+        g = found.or(fallback)?;
     }
     let win = window_px / CELL; // 格子半径
     let win2 = (win * win) as f32;
@@ -85,6 +98,10 @@ pub fn find_path(world: &World, start: Vec2, goal: Vec2, window_px: i32) -> Opti
                 continue;
             }
             if solid_cell(world, n) {
+                continue;
+            }
+            // 重力可走：水平/向上移动要求落点脚下有地面（dy>0 向下 = 坠落，允许）
+            if dy <= 0 && !grounded_cell(world, n) {
                 continue;
             }
             // 防穿角：对角需要两个正交格都可走
