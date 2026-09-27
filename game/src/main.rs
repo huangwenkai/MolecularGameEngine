@@ -741,6 +741,7 @@ impl App for GameApp {
         }
 
         // ---- 世界与实体 ----
+        self.world.time_frozen = self.settings.time_lock;
         self.world.update();
         let deaths = entities::update(&mut self.ecs, &mut self.world, &mut self.rng);
         for d in deaths {
@@ -792,9 +793,11 @@ impl App for GameApp {
             })
             .collect();
 
-        // ---- 刷怪与战斗 AI ----
-        self.monsters
-            .spawn_tick(&self.world, self.player.pos, self.inv.level, &mut self.rng);
+        // ---- 刷怪与战斗 AI（刷怪开关：关闭后不自然生成，已有怪物保留）----
+        if self.settings.spawn_on {
+            self.monsters
+                .spawn_tick(&self.world, self.player.pos, self.inv.level, &mut self.rng);
+        }
         let (mdeaths, hurt, mknock) = self.monsters.update(
             &mut self.world,
             (

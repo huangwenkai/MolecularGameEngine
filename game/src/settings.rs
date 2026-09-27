@@ -21,6 +21,12 @@ pub struct Settings {
     /// 当前存档位 1~3（F5/F9 快存快读作用于该存档位）
     #[serde(default = "default_slot")]
     pub slot: u8,
+    /// 刷怪开关（关闭后不再自然生成怪物，已有怪物保留）
+    #[serde(default = "default_true")]
+    pub spawn_on: bool,
+    /// 时间锁定（锁定当前时刻：昼夜推进暂停）
+    #[serde(default)]
+    pub time_lock: bool,
     /// 键位覆盖项 (动作名, 键名)
     pub bindings: Vec<(String, String)>,
 }
@@ -29,9 +35,20 @@ fn default_slot() -> u8 {
     1
 }
 
+fn default_true() -> bool {
+    true
+}
+
 impl Default for Settings {
     fn default() -> Self {
-        Self { volume: 0.8, shake: 1.0, slot: 1, bindings: Vec::new() }
+        Self {
+            volume: 0.8,
+            shake: 1.0,
+            slot: 1,
+            spawn_on: true,
+            time_lock: false,
+            bindings: Vec::new(),
+        }
     }
 }
 
@@ -256,13 +273,18 @@ impl SettingsUi {
         egui::Window::new("系统设置 (ESC)")
             .open(&mut open)
             .collapsible(false)
-            .default_width(460.0)
-            .default_pos([360.0, 120.0])
+            .default_width(720.0)
+            .default_pos([320.0, 100.0])
             .show(egui, |ui| {
-                let map = input.map();
+                // 高度限制：内容超过 540px 时面板内部滚动，窗口不再无限撑高
+                egui::ScrollArea::vertical().max_height(540.0).show(ui, |ui| {
+                    ui.columns(2, |cols| {
+                        // ============ 左列：操作方式 + 按键配置 ============
+                        let ui = &mut cols[0];
+                        let map = input.map();
 
-                // ---- 操作方式（随键位配置动态显示）----
-                ui.heading("操作方式");
+                        // ---- 操作方式（随键位配置动态显示）----
+                        ui.heading("操作方式");
                 ui.separator();
                 egui::Grid::new("controls")
                     .num_columns(2)
@@ -304,9 +326,47 @@ impl SettingsUi {
                             format!("{s} / {l}")
                         });
                     });
-                ui.add_space(6.0);
+                ui.add_space(8.0);
 
-                // ---- 声音 ----
+                // ---- 按键配置（左列）----
+                ui.heading("按键配置");
+                ui.separator();
+                match self.listen {
+                    Some(a) => {
+                        ui.colored_label(
+                            egui::Color32::YELLOW,
+                            format!("为「{}」按下新按键……（ESC 取消）", action_label(a)),
+                        );
+                        if let Some(k) = input.take_raw_key() {
+                            self.listen = None;
+                            if k != KeyCode::Escape {
+                                input.map_mut().set_binding(k, a);
+                                settings.record(a, k);
+                                settings.save();
+                            }
+                        }
+                    }
+                    None => {
+                        for &a in REBINDABLE {
+                            let name = action_label(a);
+                            let key = key_of(input.map(), a);
+                            if ui.button(format!("{name}  [{key}]")).clicked() {
+                                self.listen = Some(a);
+                            }
+                        }
+                        ui.add_space(4.0);
+                        if ui.button("恢复默认键位").clicked() {
+                            settings.bindings.clear();
+                            *input.map_mut() = ActionMap::standard();
+                            settings.save();
+                        }
+                    }
+                }
+
+                        // ============ 右列：各项配置 ============
+                        let ui = &mut cols[1];
+
+                        // ---- 声音 ----
                 ui.heading("声音");
                 ui.separator();
                 let vol = ui
@@ -346,50 +406,24 @@ impl SettingsUi {
                 });
                 ui.add_space(6.0);
 
-                // ---- 按键配置 ----
-                ui.heading("按键配置");
+                // ---- 世界 ----
+                ui.heading("世界");
                 ui.separator();
-                match self.listen {
-                    Some(a) => {
-                        ui.colored_label(
-                            egui::Color32::YELLOW,
-                            format!("为「{}」按下新按键……（ESC 取消）", action_label(a)),
-                        );
-                        if let Some(k) = input.take_raw_key() {
-                            self.listen = None;
-                            if k != KeyCode::Escape {
-                                input.map_mut().set_binding(k, a);
-                                settings.record(a, k);
-                                settings.save();
-                            }
-                        }
-                    }
-                    None => {
-                        egui::Grid::new("rebind")
-                            .num_columns(4)
-                            .spacing([10.0, 4.0])
-                            .show(ui, |ui| {
-                                let mut col = 0;
-                                for &a in REBINDABLE {
-                                    let name = action_label(a);
-                                    let key = key_of(input.map(), a);
-                                    if ui.button(format!("{name}  [{key}]")).clicked() {
-                                        self.listen = Some(a);
-                                    }
-                                    col += 1;
-                                    if col % 2 == 0 {
-                                        ui.end_row();
-                                    }
-                                }
-                            });
-                        ui.add_space(4.0);
-                        if ui.button("恢复默认键位").clicked() {
-                            settings.bindings.clear();
-                            *input.map_mut() = ActionMap::standard();
-                            settings.save();
-                        }
-                    }
+                if ui
+                    .checkbox(&mut settings.spawn_on, "夜间刷怪")
+                    .changed()
+                {
+                    settings.save();
                 }
+                if ui
+                    .checkbox(&mut settings.time_lock, "时间锁定（暂停昼夜推进）")
+                    .changed()
+                {
+                    settings.save();
+                }
+                ui.add_space(6.0);
+                    }); // columns
+                }); // ScrollArea
             });
         self.open = open;
     }

@@ -32,6 +32,8 @@ pub struct World {
     pub time: f32,
     /// 一天的现实秒数
     pub day_len: f32,
+    /// 昼夜推进暂停（设置面板"时间锁定"；像素模拟等其他更新不受影响）
+    pub time_frozen: bool,
     pub spawn_x: i32,
     pub spawn_y: i32,
     /// 火把位置（像素坐标）
@@ -94,6 +96,7 @@ impl World {
             veg_mats: gr.veg_mats,
             time: 0.20,
             day_len: 480.0,
+            time_frozen: false,
             spawn_x: gr.spawn_x,
             spawn_y: gr.spawn_y,
             torches: Vec::new(),
@@ -174,7 +177,9 @@ impl World {
     /// 推进一逻辑帧（1/60s）
     pub fn update(&mut self) {
         let t0 = std::time::Instant::now();
-        self.time = (self.time + 1.0 / 60.0 / self.day_len) % 1.0;
+        if !self.time_frozen {
+            self.time = (self.time + 1.0 / 60.0 / self.day_len) % 1.0;
+        }
 
         // 像素模拟（字段拆分借用）
         self.pixels.step(&self.mats, &mut WorldHooks { light: &mut self.light });

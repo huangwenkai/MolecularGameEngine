@@ -169,18 +169,13 @@ pub fn generate(
         (id("sand"), id("snow"), id("water"), id("lava"), id("rope"));
 
     let mut rng = pixels.rng().fork();
-    let fbm_terr = Fbm::<Perlin>::new(seed as u32);
     let fbm_terr2 = Fbm::<Perlin>::new((seed ^ 0xBEEF) as u32);
     let fbm_cave = Fbm::<Perlin>::new((seed ^ 0xCAFE) as u32);
     let fbm_cave2 = Fbm::<Perlin>::new((seed ^ 0xF00D) as u32);
 
-    // ---- 地表高度（像素）----
-    let mut surf = vec![0i32; w as usize];
-    for x in 0..w {
-        let n1 = fbm_terr.get([x as f64 * 0.006, 0.0]);
-        let n2 = fbm_terr2.get([x as f64 * 0.028, 50.0]);
-        surf[x as usize] = (h as f64 * 0.34 + n1 * 44.0 + n2 * 10.0).round() as i32;
-    }
+    // ---- 地表高度（像素）——纯平地形（固定高度，无起伏；洞穴/矿脉/植被/水塘保持）----
+    let surf_y = (h as f64 * 0.34).round() as i32;
+    let surf = vec![surf_y; w as usize];
     let biome = |x: i32| biome_at(w, x);
 
     // ---- 地层填充 ----
