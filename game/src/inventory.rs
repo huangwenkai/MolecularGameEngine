@@ -315,28 +315,30 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
                 let inner = egui::Frame::NONE
                     .stroke(egui::Stroke::new(1.0_f32, Color32::from_gray(120)))
                     .inner_margin(4.0);
-                let resp = inner
-                    .show(ui, |ui| {
-                        match &app.inv.equip[ei] {
-                            Some(it) => {
-                                let d = app.db.def(&it.def);
-                                ui.set_min_size(egui::vec2(64.0, 52.0));
-                                if let Some(k) = &d.icon {
-                                    if let Some(img) = app.icons.egui_image(ui.ctx(), k, 30.0) {
-                                        ui.add(img);
-                                    }
+                let fr = inner.show(ui, |ui| {
+                    match &app.inv.equip[ei] {
+                        Some(it) => {
+                            let d = app.db.def(&it.def);
+                            ui.set_min_size(egui::vec2(64.0, 52.0));
+                            if let Some(k) = &d.icon {
+                                if let Some(img) = app.icons.egui_image(ui.ctx(), k, 30.0) {
+                                    ui.add(img);
                                 }
-                                ui.colored_label(rarity_color32(&app.db, it), &d.name);
-                                ui.small(format!("{} {}", slot_label(d.slot), slot_stat_text(&app.db, it)));
                             }
-                            None => {
-                                ui.set_min_size(egui::vec2(64.0, 52.0));
-                                ui.weak(slot.name());
-                            }
+                            ui.colored_label(rarity_color32(&app.db, it), &d.name);
+                            ui.small(format!("{} {}", slot_label(d.slot), slot_stat_text(&app.db, it)));
                         }
-                    })
-                    .response
-                    .interact(egui::Sense::click_and_drag());
+                        None => {
+                            ui.set_min_size(egui::vec2(64.0, 52.0));
+                            ui.weak(slot.name());
+                        }
+                    }
+                });
+                let resp = ui.interact(
+                    fr.response.rect,
+                    egui::Id::new("equip_cell").with(ei),
+                    egui::Sense::click_and_drag(),
+                );
                 // 拖拽源：装备位可拖到背包卸下
                 if resp.drag_started() && app.inv.equip[ei].is_some() {
                     DragAndDrop::set_payload(ui.ctx(), DRAG_EQUIP + ei);
@@ -392,27 +394,29 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
                             .unwrap_or(Color32::from_gray(60)),
                     ))
                     .inner_margin(3.0);
-                let resp = cell
-                    .show(ui, |ui| {
-                        ui.set_min_size(egui::vec2(58.0, 44.0));
-                        if let Some(it) = &app.inv.bag[idx] {
-                            let d = app.db.def(&it.def);
-                            ui.vertical(|ui| {
-                                if let Some(k) = &d.icon {
-                                    if let Some(img) = app.icons.egui_image(ui.ctx(), k, 30.0) {
-                                        ui.add(img);
-                                    }
+                let fr = cell.show(ui, |ui| {
+                    ui.set_min_size(egui::vec2(58.0, 44.0));
+                    if let Some(it) = &app.inv.bag[idx] {
+                        let d = app.db.def(&it.def);
+                        ui.vertical(|ui| {
+                            if let Some(k) = &d.icon {
+                                if let Some(img) = app.icons.egui_image(ui.ctx(), k, 30.0) {
+                                    ui.add(img);
                                 }
-                                ui.colored_label(rarity_color32(&app.db, it), &d.name);
-                                if it.count > 1 {
-                                    ui.small(format!("×{}", it.count));
-                                }
-                            });
-                        }
-                    })
-                    .response
-                    // 显式感知拖拽（Frame 响应默认可能不含 drag）
-                    .interact(egui::Sense::click_and_drag());
+                            }
+                            ui.colored_label(rarity_color32(&app.db, it), &d.name);
+                            if it.count > 1 {
+                                ui.small(format!("×{}", it.count));
+                            }
+                        });
+                    }
+                });
+                // 用独立 id 注册交互区（悬停/点击/拖拽统一走它；复用 Frame id 重复注册会丢悬停）
+                let resp = ui.interact(
+                    fr.response.rect,
+                    egui::Id::new("bag_cell").with(idx),
+                    egui::Sense::click_and_drag(),
+                );
                 // 拖拽源
                 if resp.drag_started() && app.inv.bag[idx].is_some() {
                     DragAndDrop::set_payload(ui.ctx(), idx);
