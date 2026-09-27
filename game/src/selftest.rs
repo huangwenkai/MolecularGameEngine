@@ -695,6 +695,18 @@ pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
                 cols.len()
             );
         }
+        // ---- 火焰法杖复现：切 8 号 + 按住攻击朝地面发射（触发爆炸/悬浮检测/局部重光照）----
+        1330 => {
+            input.inject(Action::Slot8, PRESS);
+            aim(input, cam, px + 40.0, py + 6.0); // 瞄准脚下地面 → 火球撞地爆炸
+        }
+        1332 => {
+            input.inject(Action::Attack, PRESS);
+        }
+        1340 => {
+            input.inject(Action::Attack, RELEASE);
+            input.inject(Action::Slot8, RELEASE);
+        }
         1249 => {
             // 人物形象回归检查：默认贴图带眼睛 + 像素编辑读写 + 图集打包
             let eye_ok = game.skin.get("char_head").map(|pt| {
@@ -929,7 +941,7 @@ pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
                 );
             }
             let _ = SPAWN_OK.set(game.monsters.list.len() == n0 + 4);
-            let new_ok = game.monsters.list.len() == n0 + 4;
+            let _new_ok = game.monsters.list.len() == n0 + 4;
             game.player.dodge_cd = 0.0;
             input.inject(mge_platform::action::Action::Dodge, PRESS);
         }
@@ -955,6 +967,16 @@ pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
                 game.player.dodge_t,
                 game.player.invuln,
                 game.player.dodge_cd,
+            );
+        }
+        // 火焰法杖压力测试后的性能采样
+        1343 => {
+            println!(
+                "[SELFTEST] 火焰法杖阶段 | 平均 {:.2}ms/tick | 模拟 {:.2} 光照 {:.2} | 活跃像素 {}",
+                game.tick_ms_sum / game.tick_count.max(1) as f32,
+                game.world.perf_sim_ms / game.tick_count.max(1) as f32,
+                game.world.perf_light_ms / game.tick_count.max(1) as f32,
+                game.world.pixels.active_pixels,
             );
         }
         _ => {}

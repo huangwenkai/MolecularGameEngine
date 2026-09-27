@@ -129,6 +129,11 @@ impl World {
         self.terrain_dirty = true;
     }
 
+    /// 局部光照脏区标记：以 (x,y) 为中心 r 像素半径内的光照重算（区域增量，不触发全图）
+    fn mark_light_px(&mut self, x: i32, y: i32, r: i32) {
+        self.light.mark_px_rect(&mge_sim::Rect { x: x - r, y: y - r, w: r * 2 + 1, h: r * 2 + 1 });
+    }
+
     /// 清除现有植被并按新定义重新生长（植被编辑器"重新生长"）
     pub fn regrow_vegetation(&mut self, defs: &[crate::veg::PlantDef]) {
         // 旧植被材质 + 新定义材质都要清除（防止定义换了材质后残留）
@@ -223,7 +228,8 @@ impl World {
         if broken == self.torch_mat {
             self.torches.retain(|(tx, ty)| *tx != x || *ty != y);
         }
-        self.terrain_dirty = true;
+        // 局部重光照（避免每次挖掘触发全图重算 + 16.8MB 全量纹理上传）
+        self.mark_light_px(x, y, 1);
         true
     }
 
@@ -249,7 +255,7 @@ impl World {
         }
         self.pixels.spawn(x, y, self.torch_mat, &self.mats);
         self.torches.push((x, y));
-        self.terrain_dirty = true;
+        self.mark_light_px(x, y, 1);
         true
     }
 
@@ -293,7 +299,8 @@ impl World {
                     .spawn(px, py, if self.rng.chance(0.6) { fire } else { smoke }, &self.mats);
             }
         }
-        self.terrain_dirty = true;
+        // 爆炸只做局部重光照（全图重算留给 2 秒安全网）
+        self.mark_light_px(cx, cy, r + 4);
         self.events.send(WorldEvent::Explosion { x: cx as f32, y: cy as f32 });
     }
 
