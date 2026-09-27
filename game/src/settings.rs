@@ -272,6 +272,8 @@ pub fn parse_key(s: &str) -> Option<KeyCode> {
 #[derive(Default)]
 pub struct SettingsUi {
     pub open: bool,
+    /// 二级页面：按键设置窗口
+    pub key_page: bool,
     /// 等待重绑定的动作（Some = 点击了按键按钮，等待玩家按新键）
     listen: Option<Action>,
 }
@@ -346,40 +348,13 @@ impl SettingsUi {
                     });
                 ui.add_space(8.0);
 
-                // ---- 按键配置（左列）----
+                // ---- 二级页面入口 ----
                 ui.heading("按键配置");
                 ui.separator();
-                match self.listen {
-                    Some(a) => {
-                        ui.colored_label(
-                            egui::Color32::YELLOW,
-                            format!("为「{}」按下新按键……（ESC 取消）", action_label(a)),
-                        );
-                        if let Some(k) = input.take_raw_key() {
-                            self.listen = None;
-                            if k != KeyCode::Escape {
-                                input.map_mut().set_binding(k, a);
-                                settings.record(a, k);
-                                settings.save();
-                            }
-                        }
-                    }
-                    None => {
-                        for &a in REBINDABLE {
-                            let name = action_label(a);
-                            let key = key_of(input.map(), a);
-                            if ui.button(format!("{name}  [{key}]")).clicked() {
-                                self.listen = Some(a);
-                            }
-                        }
-                        ui.add_space(4.0);
-                        if ui.button("恢复默认键位").clicked() {
-                            settings.bindings.clear();
-                            *input.map_mut() = ActionMap::standard();
-                            settings.save();
-                        }
-                    }
+                if ui.button("更改按键……").clicked() {
+                    self.key_page = true;
                 }
+                ui.small("点击打开二级页面，点击要修改的项后按下新键");
 
                         // ============ 右列：各项配置 ============
                         let ui = &mut cols[1];
@@ -453,6 +428,50 @@ impl SettingsUi {
                 }); // ScrollArea
             });
         self.open = open;
+
+        // ---- 二级页面：按键设置 ----
+        if self.key_page {
+            let mut kp = self.key_page;
+            egui::Window::new("按键设置")
+                .open(&mut kp)
+                .collapsible(false)
+                .default_width(420.0)
+                .default_pos([520.0, 140.0])
+                .show(egui, |ui| {
+                    match self.listen {
+                        Some(a) => {
+                            ui.colored_label(
+                                egui::Color32::YELLOW,
+                                format!("为「{}」按下新按键……（ESC 取消）", action_label(a)),
+                            );
+                            if let Some(k) = input.take_raw_key() {
+                                self.listen = None;
+                                if k != KeyCode::Escape {
+                                    input.map_mut().set_binding(k, a);
+                                    settings.record(a, k);
+                                    settings.save();
+                                }
+                            }
+                        }
+                        None => {
+                            for &a in REBINDABLE {
+                                let name = action_label(a);
+                                let key = key_of(input.map(), a);
+                                if ui.button(format!("{name}  [{key}]")).clicked() {
+                                    self.listen = Some(a);
+                                }
+                            }
+                            ui.separator();
+                            if ui.button("恢复默认键位").clicked() {
+                                settings.bindings.clear();
+                                *input.map_mut() = ActionMap::standard();
+                                settings.save();
+                            }
+                        }
+                    }
+                });
+            self.key_page = kp;
+        }
     }
 }
 
