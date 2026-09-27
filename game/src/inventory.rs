@@ -298,7 +298,7 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
         ui.separator();
 
         // ---- 装备槽 ----
-        ui.label("装备（点击卸下）");
+        ui.label("装备（左键/右键卸下，可拖拽到背包）");
         ui.horizontal(|ui| {
             for (ei, slot) in [
                 Slot::Weapon,
@@ -329,8 +329,12 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
                         }
                     })
                     .response;
-                // 卸下 / 拖放目标
-                if resp.clicked() && app.inv.equip[ei].is_some() {
+                // 拖拽源：装备位可拖到背包卸下
+                if resp.drag_started() && app.inv.equip[ei].is_some() {
+                    DragAndDrop::set_payload(ui.ctx(), DRAG_EQUIP + ei);
+                }
+                // 卸下（左键/右键）/ 拖放目标
+                if (resp.clicked() || resp.secondary_clicked()) && app.inv.equip[ei].is_some() {
                     app.inv.unequip(ei, &app.db);
                 }
                 if let Some(payload) = DragAndDrop::payload::<usize>(ui.ctx()) {
@@ -353,7 +357,7 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
         ui.separator();
 
         // ---- 背包格子（6 列自动换行 + 高度限制，超出滚动）----
-        ui.label("背包（点击装备/使用，可拖拽）");
+        ui.label("背包（左键/右键装备·使用，可拖拽整理）");
         const BAG_COLS: usize = 6;
         let used_click = egui::ScrollArea::vertical()
             .id_salt("inv_bag_scroll")
@@ -411,8 +415,8 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
                         }
                     }
                 }
-                // 点击：装备/使用
-                if resp.clicked() && app.inv.bag[idx].is_some() {
+                // 点击（左键/右键）：装备/使用
+                if (resp.clicked() || resp.secondary_clicked()) && app.inv.bag[idx].is_some() {
                     used_click = Some(idx);
                 }
                 item_tooltip(resp.clone(), app, app.inv.bag[idx].as_ref(), Some(idx));
