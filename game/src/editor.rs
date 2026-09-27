@@ -1070,15 +1070,45 @@ fn tab_items(ui: &mut egui::Ui, app: &mut GameApp) {
                 .to_string();
     }
     ui.columns(2, |cols| {
-        // ============ 左列：物品列表 / 新建 / 保存 ============
+        // ============ 左列：仅物品选择 ============
         {
             let ui = &mut cols[0];
-            ui.heading("物品库");
+            ui.heading("物品列表");
             ui.separator();
+            egui::ScrollArea::vertical()
+                .id_salt("item_list_scroll")
+                .max_height(430.0)
+                .show(ui, |ui| {
+                    let mut ids: Vec<String> = app.db.defs.keys().cloned().collect();
+                    ids.sort();
+                    for id in ids {
+                        let (name, cat) = {
+                            let d = &app.db.defs[&id];
+                            (d.name.clone(), d.category())
+                        };
+                        if ui
+                            .selectable_label(app.editor.item_sel == id, format!("{name} · {cat}"))
+                            .on_hover_text(format!("id: {id}"))
+                            .clicked()
+                        {
+                            app.editor.item_sel = id;
+                        }
+                    }
+                });
+            ui.small("← 选择物品，在右侧编辑\n（悬停列表项可看 id）");
+        }
+        // ============ 右列：新建 + 配置面板 + 保存 ============
+        {
+            let ui = &mut cols[1];
+            ui.heading("编辑");
+            ui.separator();
+
+            // ---- 新建 ----
             ui.horizontal(|ui| {
                 let id_hint = ui.add(
                     egui::TextEdit::singleline(&mut app.editor.item_new_id)
-                        .hint_text("新物品 id（英文）"),
+                        .hint_text("新物品 id（英文）")
+                        .desired_width(140.0),
                 );
                 let id = app.editor.item_new_id.trim().to_string();
                 if ui
@@ -1112,49 +1142,10 @@ fn tab_items(ui: &mut egui::Ui, app: &mut GameApp) {
                 }
                 id_hint.request_focus();
             });
-            ui.add_space(4.0);
-            egui::ScrollArea::vertical()
-                .max_height(400.0)
-                .show(ui, |ui| {
-                    let mut ids: Vec<String> = app.db.defs.keys().cloned().collect();
-                    ids.sort();
-                    for id in ids {
-                        let cat = app.db.defs[&id].category();
-                        if ui
-                            .selectable_label(app.editor.item_sel == id, format!("{id} · {cat}"))
-                            .clicked()
-                        {
-                            app.editor.item_sel = id;
-                        }
-                    }
-                });
-            ui.separator();
-            if ui.button("💾 保存 items.ron").clicked() {
-                match app.db.save() {
-                    Ok(()) => {
-                        app.editor.item_err = None;
-                        if let Ok(m) = std::fs::metadata(crate::items::ItemDb::path())
-                            .and_then(|m| m.modified().map_err(|e| e.into()))
-                        {
-                            app.editor.items_mtime = Some(m);
-                        }
-                    }
-                    Err(e) => app.editor.item_err = Some(format!("保存失败: {e}")),
-                }
-            }
-            if let Some(e) = &app.editor.item_err {
-                ui.colored_label(egui::Color32::RED, e);
-            }
-            ui.small("物品改动也可保存后经热重载进入游戏（背包/掉落/合成即时生效）");
-        }
-        // ============ 右列：选中物品的配置面板（按类型展示不同参数）============
-        {
-            let ui = &mut cols[1];
-            ui.heading("属性配置");
             ui.separator();
             let sel = app.editor.item_sel.clone();
             let Some(def) = app.db.defs.get_mut(&sel) else {
-                ui.weak("← 从左侧选择物品，或输入 id 新建");
+                ui.weak("← 从左侧选择物品，或在上方输入 id 新建");
                 return;
             };
 
@@ -1266,29 +1257,34 @@ fn tab_items(ui: &mut egui::Ui, app: &mut GameApp) {
                                 for i in 0..n {
                                     let key = crate::icons::IconBank::sheet_key(i);
                                     let sel = cur_idx == Some(i);
-                                    // 金框 = 当前物品已选用的图标；悬停 = 白框提示可点
+                                    // 金框 = 当前物品已选用的图标
                                     let stroke = if sel {
                                         egui::Stroke::new(2.0_f32, egui::Color32::GOLD)
                                     } else {
                                         egui::Stroke::NONE
                                     };
-                                    let r = egui::Frame::NONE
+                                    let fr = egui::Frame::NONE
                                         .stroke(stroke)
                                         .inner_margin(1.0)
                                         .show(ui, |ui| {
                                             if let Some(img) =
                                                 app.icons.egui_image(ui.ctx(), &key, 32.0)
                                             {
-                                                ui.add(img.sense(egui::Sense::click()));
+                                                ui.add(img);
                                             } else {
                                                 ui.weak("?");
                                             }
-                                        })
-                                        .response;
-                                    if r.clicked() {
+                                        });
+                                    // 独立 id 注册点击区（Frame 复合响应不带 click，直接依赖它点击永远不触发）
+                                    let resp = ui.interact(
+                                        fr.response.rect,
+                                        egui::Id::new("icon_pick").with(i),
+                                        egui::Sense::click(),
+                                    );
+                                    if resp.clicked() {
                                         app.editor.icon_pick = Some(i);
                                     }
-                                    if r.hovered() && !sel {
+                                    if resp.hovered() && !sel {
                                         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                                     }
                                     if (i + 1) % 10 == 0 {
@@ -1343,6 +1339,30 @@ fn tab_items(ui: &mut egui::Ui, app: &mut GameApp) {
                     ui.add(egui::DragValue::new(&mut def.stack).range(2..=999));
                 });
             }
+
+            // ---- 保存 / 错误提示（右列底部）----
+            ui.add_space(4.0);
+            ui.separator();
+            ui.horizontal(|ui| {
+                if ui.button("💾 保存 items.ron").clicked() {
+                    match app.db.save() {
+                        Ok(()) => {
+                            app.editor.item_err = None;
+                            if let Ok(m) = std::fs::metadata(crate::items::ItemDb::path())
+                                .and_then(|m| m.modified().map_err(|e| e.into()))
+                            {
+                                app.editor.items_mtime = Some(m);
+                            }
+                        }
+                        Err(e) => app.editor.item_err = Some(format!("保存失败: {e}")),
+                    }
+                }
+                if let Some(e) = &app.editor.item_err {
+                    ui.colored_label(egui::Color32::RED, e);
+                } else {
+                    ui.small("保存后经热重载进游戏（背包/掉落/合成即时生效）");
+                }
+            });
         }
     });
 }

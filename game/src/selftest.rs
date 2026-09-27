@@ -31,6 +31,11 @@ const SHOTS: &[(u64, &str)] = &[
 ];
 
 pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
+    // 每帧固化测试环境：selftest 必须与用户 settings.ron 中的开关状态无关
+    // （用户开了"时间锁定"/关了"夜间刷怪"会导致 IDE 视口/刷怪等测试假性失败）
+    game.settings.time_lock = false;
+    game.settings.spawn_on = true;
+    game.world.time_frozen = false;
     let tick = ctx.frame;
     for (t, name) in SHOTS {
         if *t == tick {

@@ -4,6 +4,7 @@
 //! 每个选中的图标保存为独立 PNG，键 = 文件名（不含扩展名）。
 use mge_render::renderer::Renderer;
 use mge_render::Region;
+use std::cell::RefCell;
 use std::collections::HashMap;
 
 pub struct IconBank {
@@ -11,8 +12,8 @@ pub struct IconBank {
     pub regions: HashMap<String, Region>,
     /// 原始像素（egui 显示用；64×64 每张，量小无压力）
     pub pixels: HashMap<String, image::RgbaImage>,
-    /// egui 纹理缓存
-    tex: HashMap<String, egui::TextureHandle>,
+    /// egui 纹理缓存（RefCell：tooltip 只拿到 &GameApp 也要能懒加载纹理）
+    tex: RefCell<HashMap<String, egui::TextureHandle>>,
     /// 是否已完成启动扫描
     pub loaded: bool,
 }
@@ -22,7 +23,7 @@ impl Default for IconBank {
         Self {
             regions: HashMap::new(),
             pixels: HashMap::new(),
-            tex: HashMap::new(),
+            tex: RefCell::new(HashMap::new()),
             loaded: false,
         }
     }
@@ -64,7 +65,7 @@ impl IconBank {
         };
         renderer.upload_atlas(x, y, w, h, img.as_raw());
         let s = renderer.atlas_size() as f32;
-        self.tex.remove(key);
+        self.tex.borrow_mut().remove(key);
         let region = Region {
             uv0: [x as f32 / s, y as f32 / s],
             uv1: [(x + w) as f32 / s, (y + h) as f32 / s],
@@ -91,28 +92,31 @@ impl IconBank {
         self.pixels.insert(key.to_string(), img);
     }
 
+    /// egui 纹理 id（自绘 tooltip 用；确保纹理已创建；&self + RefCell 缓存）
+    pub fn texture_id(&self, ctx: &egui::Context, key: &str) -> Option<egui::TextureId> {
+        let has = self.tex.borrow().contains_key(key);
+        if !has {
+            let px = self.pixels.get(key)?;
+            let img = egui::ColorImage::from_rgba_unmultiplied(
+                [px.width() as usize, px.height() as usize],
+                px.as_raw(),
+            );
+            let t = ctx.load_texture(format!("icon:{key}"), img, egui::TextureOptions::NEAREST);
+            self.tex.borrow_mut().insert(key.to_string(), t);
+        }
+        self.tex.borrow().get(key).map(|t| t.id())
+    }
+
     /// egui 图像（懒加载纹理；背包格/编辑器选择器共用）
     pub fn egui_image(
-        &mut self,
+        &self,
         ctx: &egui::Context,
         key: &str,
         size: f32,
     ) -> Option<egui::Image<'static>> {
-        let tex = match self.tex.get(key) {
-            Some(t) => t.clone(),
-            None => {
-                let px = self.pixels.get(key)?;
-                let img = egui::ColorImage::from_rgba_unmultiplied(
-                    [px.width() as usize, px.height() as usize],
-                    px.as_raw(),
-                );
-                let t = ctx.load_texture(format!("icon:{key}"), img, egui::TextureOptions::NEAREST);
-                self.tex.insert(key.to_string(), t.clone());
-                t
-            }
-        };
+        let id = self.texture_id(ctx, key)?;
         Some(
-            egui::Image::new(egui::load::SizedTexture::new(tex.id(), egui::vec2(size, size))),
+            egui::Image::new(egui::load::SizedTexture::new(id, egui::vec2(size, size))),
         )
     }
 }

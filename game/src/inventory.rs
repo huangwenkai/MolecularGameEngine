@@ -526,80 +526,147 @@ fn slot_stat_text(db: &ItemDb, it: &Item) -> String {
     parts.join(" ")
 }
 
-/// 悬停物品 Tooltip：名称/稀有度 + 类型介绍 + 属性（装备类显示与当前装备的对比）+ 操作提示
+/// 悬停物品介绍：**自绘浮框**（Tooltip 层、跟随鼠标）——绕开 egui Popup/Tooltip 机制，保证显示
 fn item_tooltip(resp: egui::Response, app: &GameApp, item: Option<&Item>, bag_idx: Option<usize>) {
     let Some(it) = item else { return };
+    if !resp.hovered() {
+        return;
+    }
     let d = app.db.def(&it.def);
     let r = app.db.rarity(it);
-    resp.on_hover_ui(|ui| {
-        ui.set_max_width(240.0);
-        ui.colored_label(rarity_color32(&app.db, it), format!("{}（{}）", d.name, r.name()));
-        ui.weak(format!(
-            "{} · 等级{} · 价值{} · 可堆叠×{}",
-            d.category(),
-            d.lvl,
-            d.value,
-            d.stack
-        ));
-        ui.separator();
-        // ---- 属性 ----
-        if d.stack == 1 && d.dmg > 0.0 {
-            // 武器对比：显示与当前佩戴的差值
-            let ei = d.slot.equip_index();
-            let cur = app.inv.equip[ei]
-                .as_ref()
-                .map(|c| app.db.def(&c.def).dmg)
-                .unwrap_or(0.0);
-            let delta = d.dmg - cur;
-            let (txt, col) = if app.inv.equip[ei].is_some() {
-                (
-                    format!("伤害 {:.0} ({:+.0})", d.dmg, delta),
-                    if delta >= 0.0 { Color32::LIGHT_GREEN } else { Color32::LIGHT_RED },
-                )
-            } else {
-                (format!("伤害 {:.0}", d.dmg), Color32::WHITE)
-            };
-            ui.colored_label(col, txt);
-        }
-        if d.armor > 0.0 {
-            ui.label(format!("护甲 {:.0}", d.armor));
-        }
-        if d.speed != 1.0 {
-            ui.label(format!("攻速 ×{:.2}", d.speed));
-        }
-        if d.crit > 0.0 {
-            ui.label(format!("暴击率 +{:.1}%", d.crit));
-        }
-        if d.crit_dmg > 0.0 {
-            ui.label(format!("暴击伤害 +{:.0}%", d.crit_dmg));
-        }
-        for a in &it.affixes {
-            ui.colored_label(Color32::from_rgb(90, 170, 255), app.db.affix_text(a));
-        }
-        // ---- 介绍（按类型）----
-        ui.separator();
-        if d.stack == 1 {
-            ui.weak(format!(
-                "介绍：{}，装备后提升角色属性。左键/右键装备到「{}」位。",
-                slot_label(d.slot),
-                slot_label(d.slot)
-            ));
-        } else if d.hp > 0.0 {
-            ui.weak(format!(
-                "介绍：药物，使用后恢复 {:.0} 生命。左键/右键使用，快捷键 Q。",
-                d.hp
-            ));
+    let weak = Color32::from_gray(165);
+    let mut lines: Vec<(String, Color32)> = vec![
+        (format!("{}（{}）", d.name, r.name()), rarity_color32(&app.db, it)),
+        (
+            format!("{} · 等级{} · 价值{} · 可堆叠×{}", d.category(), d.lvl, d.value, d.stack),
+            weak,
+        ),
+        (String::new(), weak), // 分隔线占位
+    ];
+    // ---- 属性 ----
+    if d.stack == 1 && d.dmg > 0.0 {
+        // 武器对比：显示与当前佩戴的差值
+        let ei = d.slot.equip_index();
+        let cur = app.inv.equip[ei]
+            .as_ref()
+            .map(|c| app.db.def(&c.def).dmg)
+            .unwrap_or(0.0);
+        let delta = d.dmg - cur;
+        let (txt, col) = if app.inv.equip[ei].is_some() {
+            (
+                format!("伤害 {:.0} ({:+.0})", d.dmg, delta),
+                if delta >= 0.0 { Color32::LIGHT_GREEN } else { Color32::LIGHT_RED },
+            )
         } else {
-            ui.weak("介绍：合成材料，在背包下方合成区用于制作物品。");
-        }
-        // ---- 操作提示 ----
-        if bag_idx.is_some() {
-            ui.weak(format!(
+            (format!("伤害 {:.0}", d.dmg), Color32::WHITE)
+        };
+        lines.push((txt, col));
+    }
+    if d.armor > 0.0 {
+        lines.push((format!("护甲 {:.0}", d.armor), Color32::WHITE));
+    }
+    if d.speed != 1.0 {
+        lines.push((format!("攻速 ×{:.2}", d.speed), Color32::WHITE));
+    }
+    if d.crit > 0.0 {
+        lines.push((format!("暴击率 +{:.1}%", d.crit), Color32::WHITE));
+    }
+    if d.crit_dmg > 0.0 {
+        lines.push((format!("暴击伤害 +{:.0}%", d.crit_dmg), Color32::WHITE));
+    }
+    for a in &it.affixes {
+        lines.push((app.db.affix_text(a), Color32::from_rgb(90, 170, 255)));
+    }
+    // ---- 介绍（按类型）----
+    lines.push((String::new(), weak));
+    if d.stack == 1 {
+        lines.push((
+            format!("介绍：{}，装备后提升角色属性。", slot_label(d.slot)),
+            weak,
+        ));
+    } else if d.hp > 0.0 {
+        lines.push((format!("介绍：药物，使用后恢复 {:.0} 生命（快捷键 Q）。", d.hp), weak));
+    } else {
+        lines.push(("介绍：合成材料，用于背包下方合成区。".to_string(), weak));
+    }
+    // ---- 操作提示 ----
+    if bag_idx.is_some() {
+        lines.push((
+            format!(
                 "操作：左键/右键{} · 拖拽整理 · 拖出窗口丢弃",
                 if d.stack == 1 { "装备" } else if d.hp > 0.0 { "使用" } else { "放置" }
-            ));
-        } else {
-            ui.weak("操作：左键/右键卸下 · 拖到背包卸下 · 拖出窗口丢弃");
+            ),
+            weak,
+        ));
+    } else {
+        lines.push(("操作：左键/右键卸下 · 拖到背包卸下 · 拖出窗口丢弃".to_string(), weak));
+    }
+
+    // ---- 自绘浮框 ----
+    let ctx = resp.ctx.clone();
+    let font_id = egui::TextStyle::Body.resolve(&ctx.style());
+    let line_h = font_id.size * 1.5;
+    let galleys: Vec<(std::sync::Arc<egui::Galley>, Color32)> = lines
+        .iter()
+        .map(|(t, c)| {
+            let g = ctx.fonts(|f| f.layout_no_wrap(t.clone(), font_id.clone(), *c));
+            (g, *c)
+        })
+        .collect();
+    let pad = 8.0;
+    // 图标列：有图标时文本整体右移 48px
+    let icon = d.icon.as_ref().and_then(|k| app.icons.texture_id(&ctx, k));
+    let icon_w = if icon.is_some() { 48.0 } else { 0.0 };
+    let text_w = galleys
+        .iter()
+        .map(|(g, _)| g.size().x)
+        .fold(0.0f32, f32::max);
+    let w = icon_w + text_w + pad * 2.0;
+    let h = (pad * 2.0 + line_h * galleys.len() as f32).max(if icon.is_some() { 56.0 } else { 0.0 });
+    let pos = ctx
+        .input(|i| i.pointer.hover_pos())
+        .unwrap_or_else(|| resp.rect.left_top());
+    let screen = ctx.screen_rect();
+    let mut tl = pos + egui::vec2(16.0, 12.0);
+    if tl.x + w > screen.right() {
+        tl.x = pos.x - 16.0 - w;
+    }
+    if tl.y + h > screen.bottom() {
+        tl.y = pos.y - 12.0 - h;
+    }
+    let rect = egui::Rect::from_min_size(tl, egui::vec2(w, h));
+    let painter =
+        ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("item_tooltip_painter")));
+    painter.rect_filled(rect, 4.0, Color32::from_rgba_unmultiplied(16, 18, 26, 240));
+    painter.rect_stroke(
+        rect,
+        4.0,
+        egui::Stroke::new(1.0_f32, Color32::from_gray(90)),
+        egui::StrokeKind::Inside,
+    );
+    // 物品图标（左上角，垂直居中于前几行）
+    if let Some(tid) = icon {
+        let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+        painter.image(
+            tid,
+            egui::Rect::from_min_size(
+                egui::pos2(tl.x + pad, tl.y + pad),
+                egui::vec2(40.0, 40.0),
+            ),
+            uv,
+            Color32::WHITE,
+        );
+    }
+    for (i, (g, c)) in galleys.iter().enumerate() {
+        let tx = tl.x + pad + icon_w;
+        if g.text().is_empty() {
+            let y = tl.y + pad + i as f32 * line_h + line_h * 0.5;
+            painter.line_segment(
+                [egui::pos2(tx, y), egui::pos2(tl.x + w - pad, y)],
+                egui::Stroke::new(0.5_f32, Color32::from_gray(80)),
+            );
+            continue;
         }
-    });
+        painter.galley(egui::pos2(tx, tl.y + pad + i as f32 * line_h), g.clone(), *c);
+    }
 }
