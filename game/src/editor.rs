@@ -8,11 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// 运行时数据文件路径（编辑器读写；编译期嵌入仅作初始兜底）
-pub const VFX_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/data/vfx.ron");
-pub const WEAPONS_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/data/weapons.ron");
-pub const MATERIALS_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../assets/data/materials.ron");
-pub const VEG_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../assets/data/vegetation.ron");
-pub const SHADERS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../assets/shaders/");
+// 资源路径统一由 crate::project 解析（工程优先，内置兜底）
 
 const SHADERS: &[(&str, mge_render::renderer::ShaderKind)] = &[
     ("sprite.wgsl", mge_render::renderer::ShaderKind::Sprite),
@@ -44,14 +40,8 @@ pub fn spawn_watcher() -> (
         }
     };
     // 三个监视目录：引擎数据表（materials/vegetation）、游戏数据表（vfx/weapons/animations）、着色器
-    let dirs = [
-        std::path::Path::new(MATERIALS_PATH)
-            .parent()
-            .map(|p| p.to_path_buf()),
-        std::path::Path::new(VFX_PATH).parent().map(|p| p.to_path_buf()),
-        Some(std::path::PathBuf::from(SHADERS_DIR)),
-    ];
-    for d in dirs.into_iter().flatten() {
+    let dirs = crate::project::watch_dirs();
+    for d in dirs {
         if let Err(e) = watcher.watch(&d, notify::RecursiveMode::NonRecursive) {
             tracing::warn!("watch {d:?} 失败: {e}");
         }
@@ -148,7 +138,7 @@ pub struct VfxEditor {
 
 /// 读取武器映射（文件缺失/损坏时用默认）
 pub fn load_weapons() -> WeaponFx {
-    match std::fs::read_to_string(WEAPONS_PATH) {
+    match std::fs::read_to_string(crate::project::path_of("data/weapons.ron")) {
         Ok(s) => ron::from_str(&s).unwrap_or_else(|e| {
             tracing::warn!("weapons.ron 解析失败，使用默认: {e}");
             WeaponFx::default()
@@ -159,7 +149,7 @@ pub fn load_weapons() -> WeaponFx {
 
 /// 读取植被定义（文件缺失/损坏时用编译期嵌入表）
 pub fn load_veg() -> mge_world::veg::VegFile {
-    match std::fs::read_to_string(VEG_PATH) {
+    match std::fs::read_to_string(crate::project::path_of("data/vegetation.ron")) {
         Ok(s) => mge_world::veg::VegFile::from_ron(&s).unwrap_or_else(|e| {
             tracing::warn!("vegetation.ron 解析失败，使用默认: {e}");
             mge_world::veg::VegFile::embedded()
@@ -172,11 +162,11 @@ pub fn load_veg() -> mge_world::veg::VegFile {
 pub fn save_veg(app: &mut GameApp) {
     match ron::ser::to_string_pretty(&app.veg, Default::default()) {
         Ok(s) => {
-            if let Err(e) = std::fs::write(VEG_PATH, &s) {
+            if let Err(e) = std::fs::write(crate::project::path_of("data/vegetation.ron"), &s) {
                 tracing::error!("vegetation.ron 保存失败: {e}");
             } else {
                 tracing::info!("vegetation.ron 已保存（{} 种植被）", app.veg.plants.len());
-                if let Ok(m) = mtime(VEG_PATH) {
+                if let Ok(m) = mtime(&crate::project::path_of("data/vegetation.ron")) {
                     app.editor.veg_mtime = Some(m);
                 }
             }
@@ -189,11 +179,11 @@ pub fn save_veg(app: &mut GameApp) {
 pub fn save_weapons(app: &mut GameApp) {
     match ron::ser::to_string_pretty(&app.weapons, Default::default()) {
         Ok(s) => {
-            if let Err(e) = std::fs::write(WEAPONS_PATH, &s) {
+            if let Err(e) = std::fs::write(crate::project::path_of("data/weapons.ron"), &s) {
                 tracing::error!("weapons.ron 保存失败: {e}");
             } else {
                 tracing::info!("weapons.ron 已保存");
-                if let Ok(m) = mtime(WEAPONS_PATH) {
+                if let Ok(m) = mtime(&crate::project::path_of("data/weapons.ron")) {
                     app.editor.wpn_mtime = Some(m);
                 }
             }
@@ -206,11 +196,11 @@ pub fn save_weapons(app: &mut GameApp) {
 pub fn save_vfx(app: &mut GameApp) {
     match ron::ser::to_string_pretty(&app.vfx.bps, Default::default()) {
         Ok(s) => {
-            if let Err(e) = std::fs::write(VFX_PATH, &s) {
+            if let Err(e) = std::fs::write(crate::project::path_of("data/vfx.ron"), &s) {
                 tracing::error!("vfx.ron 保存失败: {e}");
             } else {
                 tracing::info!("vfx.ron 已保存（{} 个蓝图）", app.vfx.bps.len());
-                if let Ok(m) = mtime(VFX_PATH) {
+                if let Ok(m) = mtime(&crate::project::path_of("data/vfx.ron")) {
                     app.editor.vfx_mtime = Some(m);
                 }
             }
@@ -219,7 +209,7 @@ pub fn save_vfx(app: &mut GameApp) {
     }
 }
 
-fn mtime(path: &str) -> std::io::Result<std::time::SystemTime> {
+fn mtime(path: &std::path::Path) -> std::io::Result<std::time::SystemTime> {
     std::fs::metadata(path).and_then(|m| m.modified())
 }
 
@@ -227,11 +217,18 @@ fn mtime(path: &str) -> std::io::Result<std::time::SystemTime> {
 /// 返回 true 表示材质表被重载（调用方需重建调色板）。
 pub fn reload_if_changed(app: &mut GameApp) -> bool {
     let mut mat_reloaded = false;
+    // 资源路径：工程内优先，否则内置（M18）
+    let mat_path = crate::project::path_of("data/materials.ron");
+    let wpn_path = crate::project::path_of("data/weapons.ron");
+    let vfx_path = crate::project::path_of("data/vfx.ron");
+    let veg_path = crate::project::path_of("data/vegetation.ron");
+    let anims_path = crate::project::path_of("data/animations.ron");
+    let shader_dir = crate::project::dir_of("shaders");
     // ---- materials.ron：追加式新材质（改 id 顺序会破坏存档与既有像素）----
-    if let Ok(m) = mtime(MATERIALS_PATH) {
+    if let Ok(m) = mtime(&mat_path) {
         let changed = app.editor.mat_mtime.map(|b| b != m).unwrap_or(true);
         if changed && !app.editor.open {
-            match std::fs::read_to_string(MATERIALS_PATH) {
+            match std::fs::read_to_string(&mat_path) {
                 Ok(s) => match mge_sim::Materials::from_ron(&s) {
                     Ok(new_mats) => {
                         app.world.mats = new_mats;
@@ -249,7 +246,7 @@ pub fn reload_if_changed(app: &mut GameApp) -> bool {
         }
     }
     // ---- weapons.ron：随时可重载 ----
-    if let Ok(m) = mtime(WEAPONS_PATH) {
+    if let Ok(m) = mtime(&wpn_path) {
         let changed = app.editor.wpn_mtime.map(|b| b != m).unwrap_or(true);
         if changed {
             app.weapons = load_weapons();
@@ -257,10 +254,10 @@ pub fn reload_if_changed(app: &mut GameApp) -> bool {
         }
     }
     // ---- vfx.ron：面板打开时不自动覆盖 ----
-    if let Ok(m) = mtime(VFX_PATH) {
+    if let Ok(m) = mtime(&vfx_path) {
         let changed = app.editor.vfx_mtime.map(|b| b != m).unwrap_or(true);
         if changed && !app.editor.open {
-            match std::fs::read_to_string(VFX_PATH) {
+            match std::fs::read_to_string(&vfx_path) {
                 Ok(s) => match ron::from_str::<HashMap<String, Blueprint>>(&s) {
                     Ok(bps) => {
                         app.vfx.bps = bps;
@@ -278,7 +275,7 @@ pub fn reload_if_changed(app: &mut GameApp) -> bool {
         }
     }
     // ---- animations.ron：面板打开时跳过（防丢编辑）----
-    if let Ok(m) = mtime(crate::anim::ANIMS_PATH) {
+    if let Ok(m) = mtime(&anims_path) {
         let changed = app.editor.anims_mtime.map(|b| b != m).unwrap_or(true);
         if changed && !app.editor.open {
             let bank = crate::anim::AnimBank::load();
@@ -290,7 +287,7 @@ pub fn reload_if_changed(app: &mut GameApp) -> bool {
         }
     }
     // ---- vegetation.ron：面板打开时跳过（防丢编辑）----
-    if let Ok(m) = mtime(VEG_PATH) {
+    if let Ok(m) = mtime(&veg_path) {
         let changed = app.editor.veg_mtime.map(|b| b != m).unwrap_or(true);
         if changed && !app.editor.open {
             app.veg = load_veg();
@@ -302,7 +299,7 @@ pub fn reload_if_changed(app: &mut GameApp) -> bool {
     }
     // ---- WGSL 着色器热重载（改文件不重启）----
     for (i, (name, kind)) in SHADERS.iter().enumerate() {
-        let path = format!("{SHADERS_DIR}{name}");
+        let path = shader_dir.join(name);
         if let Ok(m) = mtime(&path) {
             let changed = app.editor.shader_mtimes[i].map(|b| b != m).unwrap_or(false);
             if changed {
@@ -425,7 +422,9 @@ fn tab_vfx(ui: &mut egui::Ui, app: &mut GameApp) {
                     do_save = true;
                 }
                 if ui.button("⟳ 从文件重载").clicked() {
-                    if let Ok(s) = std::fs::read_to_string(VFX_PATH) {
+                    if let Ok(s) =
+                        std::fs::read_to_string(crate::project::path_of("data/vfx.ron"))
+                    {
                         match ron::from_str::<HashMap<String, Blueprint>>(&s) {
                             Ok(bps) => app.vfx.bps = bps,
                             Err(e) => tracing::warn!("重载失败: {e}"),

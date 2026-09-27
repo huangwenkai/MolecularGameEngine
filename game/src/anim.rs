@@ -6,8 +6,10 @@ use mge_render::{AtlasBuilder, Region};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-pub const ANIMS_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/data/animations.ron");
-pub const ANIMS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/anims/");
+// 动画资源路径由 crate::project 解析（anims_dir / path_of）
+pub fn anims_dir() -> std::path::PathBuf {
+    crate::project::dir_of("anims")
+}
 
 fn default_loop() -> bool {
     true
@@ -45,7 +47,7 @@ impl AnimBank {
     pub fn load() -> Self {
         ensure_demo_assets();
         let mut bank = Self::default();
-        if let Ok(s) = std::fs::read_to_string(ANIMS_PATH) {
+        if let Ok(s) = std::fs::read_to_string(crate::project::path_of("data/animations.ron")) {
             match ron::from_str::<Vec<AnimDef>>(&s) {
                 Ok(defs) => {
                     for d in defs {
@@ -133,7 +135,8 @@ impl AnimBank {
         let defs: Vec<&AnimDef> = self.defs.values().collect();
         let s = ron::ser::to_string_pretty(&defs, Default::default())
             .map_err(|e| e.to_string())?;
-        std::fs::write(ANIMS_PATH, &s).map_err(|e| e.to_string())?;
+        std::fs::write(crate::project::path_of("data/animations.ron"), &s)
+            .map_err(|e| e.to_string())?;
         tracing::info!("animations.ron 已保存（{} 个动画）", defs.len());
         Ok(())
     }
@@ -141,9 +144,9 @@ impl AnimBank {
 
 /// 按定义加载并切割精灵表（行优先：第 0 行从左到右）
 pub fn load_sheet_frames(def: &AnimDef) -> Result<Vec<RgbaImage>, String> {
-    let path = format!("{}{}", ANIMS_DIR, def.sheet);
+    let path = crate::project::dir_of("anims").join(&def.sheet);
     let img = image::open(&path)
-        .map_err(|e| format!("{path}: {e}"))?
+        .map_err(|e| format!("{}: {e}", path.display()))?
         .to_rgba8();
     cut_sheet(&img, def.frame_w, def.frame_h)
 }
@@ -173,9 +176,9 @@ pub fn cut_sheet(img: &RgbaImage, fw: u32, fh: u32) -> Result<Vec<RgbaImage>, St
 
 /// 首次运行时生成示例精灵表 + 初始 animations.ron
 fn ensure_demo_assets() {
-    let dir = std::path::Path::new(ANIMS_DIR);
+    let dir = anims_dir();
     if !dir.exists() {
-        let _ = std::fs::create_dir_all(dir);
+        let _ = std::fs::create_dir_all(&dir);
     }
     let demo_path = dir.join("demo_slime.png");
     if !demo_path.exists() {
@@ -207,7 +210,7 @@ fn ensure_demo_assets() {
         let _ = sheet.save(&demo_path);
         tracing::info!("已生成示例精灵表 assets/anims/demo_slime.png");
     }
-    if !std::path::Path::new(ANIMS_PATH).exists() {
+    if !crate::project::path_of("data/animations.ron").exists() {
         let demo = vec![AnimDef {
             name: "demo_slime".into(),
             sheet: "demo_slime.png".into(),
@@ -218,7 +221,7 @@ fn ensure_demo_assets() {
             r#loop: true,
         }];
         if let Ok(s) = ron::ser::to_string_pretty(&demo, Default::default()) {
-            let _ = std::fs::write(ANIMS_PATH, &s);
+            let _ = std::fs::write(crate::project::path_of("data/animations.ron"), &s);
         }
     }
 }

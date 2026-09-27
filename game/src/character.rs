@@ -3,7 +3,7 @@
 //! 保存到 assets/character/*.png，下次启动自动加载。
 use image::{Rgba, RgbaImage};
 
-pub const CHAR_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/character/");
+// 人物形象目录由 crate::project::dir_of("character") 解析
 
 /// 部件定义（尺寸与默认色）
 pub struct PartDef {
@@ -74,7 +74,7 @@ pub fn load() -> Skin {
     let parts = PARTS
         .iter()
         .map(|def| {
-            let path = format!("{CHAR_DIR}{}", file_name(def.key));
+            let path = crate::project::dir_of("character").join(file_name(def.key));
             let img = image::open(&path)
                 .ok()
                 .map(|i| i.to_rgba8())
@@ -88,10 +88,11 @@ pub fn load() -> Skin {
 
 /// 保存全部部件贴图
 pub fn save(skin: &Skin) -> Result<(), String> {
-    std::fs::create_dir_all(CHAR_DIR).map_err(|e| e.to_string())?;
+    let dir = crate::project::dir_of("character");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     for p in &skin.parts {
-        let path = format!("{CHAR_DIR}{}", file_name(p.key));
-        p.img.save(&path).map_err(|e| format!("{path}: {e}"))?;
+        let path = dir.join(file_name(p.key));
+        p.img.save(&path).map_err(|e| format!("{}: {e}", path.display()))?;
     }
     Ok(())
 }

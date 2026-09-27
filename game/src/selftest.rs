@@ -183,7 +183,8 @@ pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
             );
             editor::save_vfx(game);
             // 模拟外部修改：从磁盘读回验证序列化正确
-            let s = std::fs::read_to_string(editor::VFX_PATH).expect("vfx.ron 缺失");
+            let s = std::fs::read_to_string(crate::project::path_of("data/vfx.ron"))
+                .expect("vfx.ron 缺失");
             let bps: std::collections::HashMap<String, Blueprint> = ron::from_str(&s).expect("vfx.ron 读回失败");
             assert!(bps.contains_key("editor_test_fx"), "保存的蓝图读回缺失");
             game.vfx.bps = bps;
@@ -849,6 +850,41 @@ pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
                 "[SELFTEST] pit recovery {} | npc_back {npc_ok} monster_cleaned {monster_ok}",
                 if npc_ok && monster_ok { "PASS" } else { "FAIL" },
             );
+        }
+        // ---- M18：游戏工程（创建/打开/关闭 + 素材路径解析 + 热重载目录）----
+        1300 => {
+            game.project.create("selftest_proj");
+        }
+        1304 => {
+            let in_proj = game.project.current.as_ref().map(|p| p.name.clone())
+                == Some("selftest_proj".to_string());
+            let mat = crate::project::path_of("data/materials.ron");
+            let mat_in_proj = mat
+                .to_string_lossy()
+                .contains("selftest_proj");
+            let has_file = mat.exists();
+            // 工程打开时监听目录指向工程
+            let watch = crate::project::watch_dirs();
+            let watch_ok = watch
+                .iter()
+                .any(|d| d.to_string_lossy().contains("selftest_proj"));
+            println!(
+                "[SELFTEST] project open {} | current {in_proj} mat_in_proj {mat_in_proj} file {has_file} watch {watch_ok}",
+                if in_proj && mat_in_proj && has_file && watch_ok { "PASS" } else { "FAIL" },
+            );
+            // 关闭工程 → 回到内置资源
+            game.project.close();
+        }
+        1306 => {
+            let builtin = crate::project::path_of("data/materials.ron");
+            let back = !builtin.to_string_lossy().contains("selftest_proj") && builtin.exists();
+            println!(
+                "[SELFTEST] project close {} | path {}",
+                if back { "PASS" } else { "FAIL" },
+                builtin.display(),
+            );
+            // 清理测试工程，避免留下脏数据
+            let _ = std::fs::remove_dir_all("projects/selftest_proj");
         }
         _ => {}
     }

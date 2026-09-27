@@ -9,12 +9,14 @@ mod debug;
 mod drops;
 mod editor;
 mod entities;
+mod ide;
 mod inventory;
 mod items;
 mod monsters;
 mod npc;
 mod player;
 mod projectiles;
+mod project;
 mod save;
 mod selftest;
 mod settings;
@@ -83,6 +85,10 @@ pub struct GameApp {
     pub hint: (String, f32),
     /// 主动技能（学习/冷却/施放，M17）
     pub skills: skills::Skills,
+    /// 游戏工程（素材根，M18）
+    pub project: project::ProjectManager,
+    /// 引擎 IDE（左中右布局，F4）
+    pub ide: ide::Ide,
     /// notify 文件监听（保活；drop 即停止监听）
     #[allow(dead_code)] // 仅保活，事件经 fs_events 通道消费
     fs_watcher: Option<notify::RecommendedWatcher>,
@@ -116,6 +122,12 @@ impl GameApp {
         tracing::info!("new: audio ok");
         let settings = settings::Settings::load();
         audio.set_volume(settings.volume);
+        // 工程：恢复上次打开的项目（决定素材路径）
+        let mut project = project::ProjectManager::default();
+        project.load_state();
+        if let Some(p) = &project.current {
+            tracing::info!("已恢复工程「{}」({})", p.name, p.root.display());
+        }
         let (fs_watcher, fs_events) = editor::spawn_watcher();
         Self {
             world,
@@ -150,6 +162,8 @@ impl GameApp {
             veg,
             skin: character::load(),
             skills: skills::Skills::default(),
+            project,
+            ide: ide::Ide::default(),
             fs_watcher,
             fs_events,
             settings_ui: settings::SettingsUi::default(),
@@ -313,6 +327,15 @@ impl App for GameApp {
         // ---- 特效编辑器：F1 开关 / 预览触发 / 热重载 ----
         if ctx.input.just_pressed(Action::ToggleEditor) {
             self.editor.open = !self.editor.open;
+        }
+        // ---- 引擎 IDE（F4）：打开时暂停游戏逻辑，仅 IDE 面板响应 ----
+        if ctx.input.just_pressed(Action::ToggleIde) {
+            self.ide.open = !self.ide.open;
+        }
+        if self.ide.open {
+            self.tick_ms_sum += t0.elapsed().as_secs_f32() * 1000.0;
+            self.tick_count += 1;
+            return;
         }
         if self.editor.trigger {
             self.editor.trigger = false;
@@ -832,6 +855,7 @@ impl App for GameApp {
             editor::draw(self, egui);
             inventory::draw(self, egui);
             skills::draw_hud(self, egui);
+            ide::draw(self, egui);
             let snap = debug::DbgSnapshot::of(self);
             self.dbg.draw(&snap, egui);
             self.settings_ui

@@ -32,6 +32,8 @@ pub enum Action {
     Skill2,
     /// 主动技能 3（治疗术）
     Skill3,
+    /// 引擎 IDE（工程/素材管理）
+    ToggleIde,
 }
 
 pub struct ActionMap {
@@ -78,6 +80,7 @@ impl ActionMap {
         put(KeyCode::KeyZ, Action::Skill1);
         put(KeyCode::KeyX, Action::Skill2);
         put(KeyCode::KeyC, Action::Skill3);
+        put(KeyCode::F4, Action::ToggleIde);
         Self { keys }
     }
 
