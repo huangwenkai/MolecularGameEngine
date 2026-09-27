@@ -335,7 +335,8 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
                             }
                         }
                     })
-                    .response;
+                    .response
+                    .interact(egui::Sense::click_and_drag());
                 // 拖拽源：装备位可拖到背包卸下
                 if resp.drag_started() && app.inv.equip[ei].is_some() {
                     DragAndDrop::set_payload(ui.ctx(), DRAG_EQUIP + ei);
@@ -372,6 +373,11 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
             .id_salt("inv_bag_scroll")
             .max_height(5.0 * 48.0)
             .auto_shrink([false, true])
+            // 关键：关闭"拖动滚动"，否则 ScrollArea 会吞掉格子上的拖拽手势
+            .scroll_source(egui::containers::scroll_area::ScrollSource {
+                drag: false,
+                ..Default::default()
+            })
             .show(ui, |ui| {
                 let mut used_click: Option<usize> = None;
                 egui::Grid::new("bag_grid").spacing([4.0, 4.0]).show(ui, |ui| {
@@ -386,24 +392,27 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
                             .unwrap_or(Color32::from_gray(60)),
                     ))
                     .inner_margin(3.0);
-                let resp = cell.show(ui, |ui| {
-                    ui.set_min_size(egui::vec2(58.0, 44.0));
-                    if let Some(it) = &app.inv.bag[idx] {
-                        let d = app.db.def(&it.def);
-                        ui.vertical(|ui| {
-                            if let Some(k) = &d.icon {
-                                if let Some(img) = app.icons.egui_image(ui.ctx(), k, 30.0) {
-                                    ui.add(img);
+                let resp = cell
+                    .show(ui, |ui| {
+                        ui.set_min_size(egui::vec2(58.0, 44.0));
+                        if let Some(it) = &app.inv.bag[idx] {
+                            let d = app.db.def(&it.def);
+                            ui.vertical(|ui| {
+                                if let Some(k) = &d.icon {
+                                    if let Some(img) = app.icons.egui_image(ui.ctx(), k, 30.0) {
+                                        ui.add(img);
+                                    }
                                 }
-                            }
-                            ui.colored_label(rarity_color32(&app.db, it), &d.name);
-                            if it.count > 1 {
-                                ui.small(format!("×{}", it.count));
-                            }
-                        });
-                    }
-                })
-                .response;
+                                ui.colored_label(rarity_color32(&app.db, it), &d.name);
+                                if it.count > 1 {
+                                    ui.small(format!("×{}", it.count));
+                                }
+                            });
+                        }
+                    })
+                    .response
+                    // 显式感知拖拽（Frame 响应默认可能不含 drag）
+                    .interact(egui::Sense::click_and_drag());
                 // 拖拽源
                 if resp.drag_started() && app.inv.bag[idx].is_some() {
                     DragAndDrop::set_payload(ui.ctx(), idx);
