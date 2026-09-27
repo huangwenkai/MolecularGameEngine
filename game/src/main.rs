@@ -594,6 +594,9 @@ impl App for GameApp {
         if ctx.input.just_pressed(Action::Inventory) {
             self.inv.ui_open = !self.inv.ui_open;
         }
+        if ctx.input.just_pressed(Action::SkillPanel) {
+            self.skills.ui_open = !self.skills.ui_open;
+        }
         if ctx.input.just_pressed(Action::Potion) {
             if self.inv.use_potion(&mut self.player.hp, self.player.max_hp, &self.db) {
                 for _ in 0..12 {
@@ -1036,6 +1039,7 @@ impl App for GameApp {
                 self.monsters.draw_boss_bar(egui);
                 editor::draw(self, egui);
                 inventory::draw(self, egui);
+                skills::draw_window(self, egui);
                 skills::draw_hud(self, egui);
                 let snap = debug::DbgSnapshot::of(self);
                 self.dbg.draw(&snap, egui);

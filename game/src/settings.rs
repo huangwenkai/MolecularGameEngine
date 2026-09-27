@@ -132,6 +132,7 @@ pub fn action_name(a: Action) -> &'static str {
         Action::Dodge => "dodge",
         Action::Walk => "walk",
         Action::Pickup => "pickup",
+        Action::SkillPanel => "skillpanel",
     }
 }
 
@@ -165,6 +166,7 @@ pub fn action_from_name(s: &str) -> Option<Action> {
         "dodge" => Action::Dodge,
         "walk" => Action::Walk,
         "pickup" => Action::Pickup,
+        "skillpanel" => Action::SkillPanel,
         _ => return None,
     })
 }
@@ -196,6 +198,7 @@ const REBINDABLE: &[Action] = &[
     Action::Dodge,
     Action::Walk,
     Action::Pickup,
+    Action::SkillPanel,
 ];
 
 /// 动作中文名（UI 展示）
@@ -229,6 +232,7 @@ fn action_label(a: Action) -> &'static str {
         Action::Dodge => "闪避",
         Action::Walk => "慢走（按住）",
         Action::Pickup => "拾取丢弃物",
+        Action::SkillPanel => "技能面板",
     }
 }
 
@@ -333,6 +337,7 @@ impl SettingsUi {
                         row(ui, "闪避", &key_of(map, Action::Dodge));
                         row(ui, "慢走", &key_of(map, Action::Walk));
                         row(ui, "拾取丢弃物", &key_of(map, Action::Pickup));
+                        row(ui, "技能面板", &key_of(map, Action::SkillPanel));
                         row(ui, "快速存档 / 读档", &{
                             let s = key_of(map, Action::QuickSave);
                             let l = key_of(map, Action::QuickLoad);

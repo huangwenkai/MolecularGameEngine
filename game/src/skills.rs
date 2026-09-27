@@ -55,6 +55,8 @@ pub struct Skills {
     pub pts: u8,
     /// 各技能等级（0 = 未学习）
     pub learned: [u8; 3],
+    /// 技能面板是否打开（独立面板，默认 K）
+    pub ui_open: bool,
     /// 剩余冷却（秒）
     cds: [f32; 3],
 }
@@ -247,5 +249,60 @@ pub fn draw_hud(app: &GameApp, ctx: &egui::Context) {
                     ui.colored_label(color, txt);
                 }
             });
+        });
+}
+
+/// 技能面板（独立窗口，默认 K 打开）：技能点 + 学习/升级
+pub fn draw_window(app: &mut GameApp, ctx: &egui::Context) {
+    if !app.skills.ui_open {
+        return;
+    }
+    egui::Window::new("技能 [K]")
+        .default_width(360.0)
+        .show(ctx, |ui| {
+            ui.heading("技能树");
+            if app.skills.pts > 0 {
+                ui.colored_label(
+                    egui::Color32::GOLD,
+                    format!("可用技能点 {}（每升 1 级获得 1 点）", app.skills.pts),
+                );
+            } else {
+                ui.weak("升级可获得技能点（每级 1 点）");
+            }
+            ui.separator();
+            for (i, def) in SKILLS.iter().enumerate() {
+                let lv = app.skills.learned[i];
+                ui.horizontal(|ui| {
+                    ui.monospace(format!(
+                        "[{}] {}{}",
+                        def.key_hint,
+                        def.name,
+                        if lv > 0 { format!(" Lv.{lv}") } else { String::new() }
+                    ));
+                    if lv == 0 {
+                        ui.add_enabled_ui(app.skills.pts > 0, |ui| {
+                            if ui.button("学习").clicked() {
+                                app.skills.learn(i);
+                            }
+                        });
+                    } else if lv < SKILL_MAX_LV {
+                        ui.add_enabled_ui(app.skills.pts > 0, |ui| {
+                            if ui.button("升级").clicked() {
+                                app.skills.learn(i);
+                            }
+                        });
+                    } else {
+                        ui.weak("MAX");
+                    }
+                });
+                ui.horizontal(|ui| {
+                    ui.small(def.desc);
+                    if lv > 0 {
+                        ui.small(format!("冷却 {:.1}s", app.skills.cd_of(i)));
+                    }
+                });
+            }
+            ui.separator();
+            ui.small("技能数据随存档保存；Z/X/C 施放。");
         });
 }

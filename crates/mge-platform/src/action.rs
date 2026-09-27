@@ -40,6 +40,8 @@ pub enum Action {
     Walk,
     /// 拾取地上的丢弃物
     Pickup,
+    /// 技能面板（独立窗口）
+    SkillPanel,
 }
 
 pub struct ActionMap {
@@ -87,6 +89,7 @@ impl ActionMap {
         put(KeyCode::KeyX, Action::Skill2);
         put(KeyCode::KeyC, Action::Skill3);
         put(KeyCode::KeyF, Action::Pickup);
+        put(KeyCode::KeyK, Action::SkillPanel);
         put(KeyCode::F4, Action::ToggleIde);
         put(KeyCode::ShiftLeft, Action::Dodge);
         put(KeyCode::ControlLeft, Action::Walk);
