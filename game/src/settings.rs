@@ -27,6 +27,9 @@ pub struct Settings {
     /// 时间锁定（锁定当前时刻：昼夜推进暂停）
     #[serde(default)]
     pub time_lock: bool,
+    /// 拾取磁吸倍率 0~3（0 = 关闭磁吸，1 = 默认）
+    #[serde(default = "default_magnet")]
+    pub magnet: f32,
     /// 键位覆盖项 (动作名, 键名)
     pub bindings: Vec<(String, String)>,
 }
@@ -39,6 +42,10 @@ fn default_true() -> bool {
     true
 }
 
+fn default_magnet() -> f32 {
+    1.0
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -47,6 +54,7 @@ impl Default for Settings {
             slot: 1,
             spawn_on: true,
             time_lock: false,
+            magnet: 1.0,
             bindings: Vec::new(),
         }
     }
@@ -123,6 +131,7 @@ pub fn action_name(a: Action) -> &'static str {
         Action::ToggleIde => "ide",
         Action::Dodge => "dodge",
         Action::Walk => "walk",
+        Action::Pickup => "pickup",
     }
 }
 
@@ -155,6 +164,7 @@ pub fn action_from_name(s: &str) -> Option<Action> {
         "ide" => Action::ToggleIde,
         "dodge" => Action::Dodge,
         "walk" => Action::Walk,
+        "pickup" => Action::Pickup,
         _ => return None,
     })
 }
@@ -185,6 +195,7 @@ const REBINDABLE: &[Action] = &[
     Action::ToggleIde,
     Action::Dodge,
     Action::Walk,
+    Action::Pickup,
 ];
 
 /// 动作中文名（UI 展示）
@@ -217,6 +228,7 @@ fn action_label(a: Action) -> &'static str {
         Action::ToggleIde => "引擎 IDE（工程/素材）",
         Action::Dodge => "闪避",
         Action::Walk => "慢走（按住）",
+        Action::Pickup => "拾取丢弃物",
     }
 }
 
@@ -320,6 +332,7 @@ impl SettingsUi {
                         row(ui, "引擎 IDE", &key_of(map, Action::ToggleIde));
                         row(ui, "闪避", &key_of(map, Action::Dodge));
                         row(ui, "慢走", &key_of(map, Action::Walk));
+                        row(ui, "拾取丢弃物", &key_of(map, Action::Pickup));
                         row(ui, "快速存档 / 读档", &{
                             let s = key_of(map, Action::QuickSave);
                             let l = key_of(map, Action::QuickLoad);
@@ -419,6 +432,15 @@ impl SettingsUi {
                     .checkbox(&mut settings.time_lock, "时间锁定（暂停昼夜推进）")
                     .changed()
                 {
+                    settings.save();
+                }
+                let mag = ui
+                    .add(
+                        egui::Slider::new(&mut settings.magnet, 0.0..=3.0)
+                            .text("拾取磁吸（0 = 关闭）"),
+                    )
+                    .drag_stopped();
+                if mag {
                     settings.save();
                 }
                 ui.add_space(6.0);

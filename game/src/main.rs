@@ -833,15 +833,32 @@ impl App for GameApp {
         }
 
         // ---- 掉落物 ----
-        let (picked, bag_full) = self
-            .drops
-            .update(&mut self.world, self.player.pos, &mut self.inv, &self.db);
+        let (picked, bag_full) = self.drops.update(
+            &mut self.world,
+            self.player.pos,
+            &mut self.inv,
+            &self.db,
+            self.settings.magnet,
+        );
         if !picked.is_empty() {
             self.audio.play(audio::Sfx::Pickup);
         }
         if bag_full {
             self.hint = ("背包已满！丢掉一些物品才能继续拾取".to_string(), 2.0);
             self.audio.play(audio::Sfx::Hurt);
+        }
+        // ---- 丢弃物手动拾取（F）：附近有丢弃物时提示，按键拾取 ----
+        if let Some(name) = self.drops.manual_candidate(self.player.pos, &self.db) {
+            self.hint = (format!("[F] 拾取 {name}"), 0.15);
+        }
+        if ctx.input.just_pressed(Action::Pickup) {
+            if let Some(name) =
+                self.drops
+                    .manual_pickup(self.player.pos, &mut self.inv, &self.db)
+            {
+                self.audio.play(audio::Sfx::Pickup);
+                self.hint = (format!("拾取 {name}"), 1.2);
+            }
         }
 
         // ---- 火球移动光源（黑夜发光）----

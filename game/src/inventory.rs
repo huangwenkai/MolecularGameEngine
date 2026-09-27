@@ -2,6 +2,7 @@
 use crate::items::{Item, ItemDb, Slot, Stats};
 use crate::GameApp;
 use egui::{Color32, DragAndDrop};
+use glam::Vec2;
 use mge_core::rng::Rng;
 
 pub const BAG_SIZE: usize = 30;
@@ -298,7 +299,8 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
         ui.separator();
 
         // ---- 装备槽 ----
-        ui.label("装备（左键/右键卸下，可拖拽到背包）");
+        ui.label("装备（左键/右键卸下，可拖拽到背包；拖出窗口丢弃）");
+        let mut drop_consumed = false;
         ui.horizontal(|ui| {
             for (ei, slot) in [
                 Slot::Weapon,
@@ -354,6 +356,8 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
                                 }
                             }
                         }
+                        drop_consumed = true;
+                        DragAndDrop::clear_payload(ui.ctx());
                     }
                 }
                 item_tooltip(resp.clone(), app, app.inv.equip[ei].as_ref(), None);
@@ -423,6 +427,8 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
                         if let Some(src) = src2 {
                             app.inv.bag.swap(src, idx);
                         }
+                        drop_consumed = true;
+                        DragAndDrop::clear_payload(ui.ctx());
                     }
                 }
                 // 点击（左键/右键）：装备/使用
@@ -451,6 +457,29 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
                     app.inv.use_potion(hp, max_hp, &app.db);
                 } else if d.stack == 1 {
                     app.inv.equip_from_bag(idx, &app.db);
+                }
+            }
+        }
+
+        // ---- 拖到背包/装备区之外松开 = 丢弃到世界 ----
+        // 丢弃物不参与磁吸，需靠近后按 F 拾取
+        if !drop_consumed {
+            if let Some(payload) = DragAndDrop::payload::<usize>(ui.ctx()) {
+                if ui.input(|i| i.pointer.any_released()) {
+                    let src = *payload;
+                    let taken = if src >= DRAG_EQUIP {
+                        app.inv.equip.get_mut(src - DRAG_EQUIP).and_then(|s| s.take())
+                    } else {
+                        app.inv.bag.get_mut(src).and_then(|s| s.take())
+                    };
+                    if let Some(it) = taken {
+                        let pos =
+                            app.player.pos + Vec2::new(app.player.facing * 22.0, -10.0);
+                        let n = it.count.max(1);
+                        app.drops.drop_manual(it, pos, app.player.facing);
+                        app.hint = (format!("已丢弃 ×{n}（靠近按 F 拾取）"), 1.5);
+                    }
+                    DragAndDrop::clear_payload(ui.ctx());
                 }
             }
         }

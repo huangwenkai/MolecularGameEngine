@@ -38,6 +38,8 @@ pub enum Action {
     Dodge,
     /// 慢走（按住）
     Walk,
+    /// 拾取地上的丢弃物
+    Pickup,
 }
 
 pub struct ActionMap {
@@ -84,6 +86,7 @@ impl ActionMap {
         put(KeyCode::KeyZ, Action::Skill1);
         put(KeyCode::KeyX, Action::Skill2);
         put(KeyCode::KeyC, Action::Skill3);
+        put(KeyCode::KeyF, Action::Pickup);
         put(KeyCode::F4, Action::ToggleIde);
         put(KeyCode::ShiftLeft, Action::Dodge);
         put(KeyCode::ControlLeft, Action::Walk);

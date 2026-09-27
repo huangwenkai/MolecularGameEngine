@@ -13,6 +13,8 @@ pub struct Drop {
     pub age: f32,
     /// 出手保护（刚掉落不被立即吸走）
     pub delay: f32,
+    /// 玩家主动丢弃：不参与磁吸，仅按 F 手动拾取
+    pub no_auto: bool,
 }
 
 #[derive(Default)]
@@ -21,7 +23,7 @@ pub struct Drops {
 }
 
 impl Drops {
-    /// 掉落一束物品（随机散开）
+    /// 掉落一束物品（随机散开；怪物掉落，正常磁吸）
     pub fn spawn_loot(&mut self, items: Vec<Item>, pos: Vec2, rng: &mut Rng) {
         for it in items {
             let ang = rng.range_f32(-2.6, -0.5);
@@ -32,6 +34,7 @@ impl Drops {
                 vel: Vec2::new(ang.cos() * spd, ang.sin() * spd),
                 age: 0.0,
                 delay: 0.35,
+                no_auto: false,
             });
         }
         if self.list.len() > 200 {
@@ -39,7 +42,57 @@ impl Drops {
         }
     }
 
+    /// 玩家丢弃（背包拖出）：朝面向方向抛出，不自动拾取
+    pub fn drop_manual(&mut self, item: Item, pos: Vec2, facing: f32) {
+        self.list.push(Drop {
+            item,
+            pos,
+            vel: Vec2::new(facing * 70.0, -50.0),
+            age: 0.0,
+            delay: 0.5,
+            no_auto: true,
+        });
+        if self.list.len() > 200 {
+            self.list.drain(0..self.list.len() - 200);
+        }
+    }
+
+    /// 附近最近的可手动拾取丢弃物（F 键提示）
+    pub fn manual_candidate(&self, player_pos: Vec2, db: &ItemDb) -> Option<String> {
+        self.list
+            .iter()
+            .filter(|d| d.no_auto && d.delay <= 0.0)
+            .filter(|d| (d.pos - player_pos).length() < 48.0)
+            .min_by(|a, b| {
+                (a.pos - player_pos)
+                    .length()
+                    .total_cmp(&(b.pos - player_pos).length())
+            })
+            .map(|d| db.def(&d.item.def).name.clone())
+    }
+
+    /// F 键手动拾取最近的丢弃物
+    pub fn manual_pickup(
+        &mut self,
+        player_pos: Vec2,
+        inv: &mut Inventory,
+        db: &ItemDb,
+    ) -> Option<String> {
+        let idx = self
+            .list
+            .iter()
+            .position(|d| d.no_auto && d.delay <= 0.0 && (d.pos - player_pos).length() < 48.0)?;
+        let d = self.list.remove(idx);
+        if inv.add(d.item.clone(), db) {
+            Some(db.def(&d.item.def).name.clone())
+        } else {
+            self.list.insert(idx, d); // 背包满放回
+            None
+        }
+    }
+
     /// 更新：像素重力 / 水面浮力 / 磁吸 / 拾取。
+    /// magnet: 磁吸倍率（0=关闭，1=默认；同时缩放半径与拉力）。
     /// 返回 (拾取物品名列表, 是否发生背包满)（UI 提示用）
     #[allow(clippy::too_many_arguments)]
     pub fn update(
@@ -48,6 +101,7 @@ impl Drops {
         player_pos: Vec2,
         inv: &mut Inventory,
         db: &ItemDb,
+        magnet: f32,
     ) -> (Vec<String>, bool) {
         let water = world.pixels.ids.water;
         let mut picked = Vec::new();
@@ -60,12 +114,13 @@ impl Drops {
             let (px, py) = (d.pos.x as i32, d.pos.y as i32);
             let in_water = world.pixels.get(px, py).mat == water;
 
-            // ---- 磁吸 ----
-            if d.delay <= 0.0 {
+            // ---- 磁吸（丢弃物 no_auto 不吸）----
+            if d.delay <= 0.0 && !d.no_auto && magnet > 0.0 {
                 let to_p = player_pos + Vec2::new(0.0, -8.0) - d.pos;
                 let dist = to_p.length();
-                if dist < 56.0 {
-                    let pull = to_p.normalize_or_zero() * 980.0 * (1.0 - dist / 56.0);
+                let range = 56.0 * magnet;
+                if dist < range {
+                    let pull = to_p.normalize_or_zero() * 980.0 * magnet * (1.0 - dist / range);
                     d.vel += pull / 60.0;
                     if dist < 8.0 {
                         if inv.add(d.item.clone(), db) {
