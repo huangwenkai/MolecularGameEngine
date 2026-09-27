@@ -3,8 +3,6 @@ use mge_core::rng::Rng;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-pub const ITEMS_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/data/items.ron");
-
 // ---- 稀有度（白/蓝/金/绿/暗金）----
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Rarity {
@@ -99,7 +97,7 @@ impl Stat {
 }
 
 // ---- 数据定义（RON）----
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ItemDef {
     pub id: String,
     pub name: String,
@@ -107,6 +105,9 @@ pub struct ItemDef {
     /// 堆叠上限（>1 即材料/消耗品）
     #[serde(default = "def_stack")]
     pub stack: u16,
+    /// 图标键（game/assets/icons/{key}.png 的文件名；None = 无图标）
+    #[serde(default)]
+    pub icon: Option<String>,
     #[serde(default)]
     pub dmg: f32,
     #[serde(default)]
@@ -139,7 +140,22 @@ fn def_one8() -> u8 {
     1
 }
 
-#[derive(Debug, Clone, Deserialize)]
+impl ItemDef {
+    /// UI 分类（物品编辑器用）：装备（stack==1）/ 消耗品（stack>1 且有恢复）/ 材料
+    pub fn category(&self) -> &'static str {
+        if self.stack > 1 {
+            if self.hp > 0.0 {
+                "消耗品"
+            } else {
+                "材料"
+            }
+        } else {
+            "装备"
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AffixDef {
     pub id: String,
     pub name: String,
@@ -152,7 +168,7 @@ pub struct AffixDef {
     pub prefix: bool,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LootEntry {
     /// 物品 id；"GEAR_RANDOM" 表示随机装备（roll 词缀）
     pub item: String,
@@ -176,7 +192,7 @@ fn def_onef() -> f32 {
     1.0
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ItemsRoot {
     pub items: Vec<ItemDef>,
     pub affixes: Vec<AffixDef>,
@@ -187,7 +203,7 @@ pub struct ItemsRoot {
     pub recipes: Vec<Recipe>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Recipe {
     pub out: String,
     #[serde(default = "def_one16")]
@@ -226,17 +242,48 @@ impl ItemDb {
         Self::from_root(root)
     }
 
+    /// 磁盘优先加载（编辑器保存过的 items.ron），失败回落内置表
+    pub fn load() -> Self {
+        let mut db = Self::embedded();
+        let _ = db.reload_from_disk();
+        db
+    }
+
     fn from_root(root: ItemsRoot) -> Self {
         let defs = root.items.into_iter().map(|d| (d.id.clone(), d)).collect();
         Self { defs, affixes: root.affixes, tables: root.tables, recipes: root.recipes }
     }
 
+    /// 数据表路径（工程优先，回落 game/assets/data）
+    pub fn path() -> std::path::PathBuf {
+        crate::project::dir_of("data").join("items.ron")
+    }
+
     /// 运行时热重载（编辑器/调平衡用）
     pub fn reload_from_disk(&mut self) -> Result<(), String> {
-        let s = std::fs::read_to_string(ITEMS_PATH).map_err(|e| e.to_string())?;
+        let s = std::fs::read_to_string(Self::path()).map_err(|e| e.to_string())?;
         let root: ItemsRoot = ron::from_str(&s).map_err(|e| e.to_string())?;
         *self = Self::from_root(root);
         Ok(())
+    }
+
+    /// 保存整表（物品编辑器用；物品按 id 排序保证输出稳定）
+    pub fn save(&self) -> Result<(), String> {
+        let mut items: Vec<&ItemDef> = self.defs.values().collect();
+        items.sort_by(|a, b| a.id.cmp(&b.id));
+        let root = ItemsRoot {
+            items: items.into_iter().cloned().collect(),
+            affixes: self.affixes.clone(),
+            tables: self.tables.clone(),
+            recipes: self.recipes.clone(),
+        };
+        let s = ron::ser::to_string_pretty(&root, ron::ser::PrettyConfig::default())
+            .map_err(|e| e.to_string())?;
+        let p = Self::path();
+        if let Some(d) = p.parent() {
+            let _ = std::fs::create_dir_all(d);
+        }
+        std::fs::write(&p, s).map_err(|e| e.to_string())
     }
 
     pub fn def(&self, id: &str) -> &ItemDef {

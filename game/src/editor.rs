@@ -134,6 +134,21 @@ pub struct VfxEditor {
     pub char_redo: Vec<(usize, image::RgbaImage)>,
     /// 正在进行的笔画（拖拽全程只压一次快照）
     pub char_stroke: bool,
+    // ---- 物品页 ----
+    /// 选中物品 id
+    pub item_sel: String,
+    /// 新建物品的 id 草稿
+    pub item_new_id: String,
+    items_mtime: Option<std::time::SystemTime>,
+    /// 图标精灵图路径（外部文件，导入后逐帧入图集）
+    pub icon_path: String,
+    /// "导入精灵图"请求（tick 中消费：需要 renderer）
+    pub icon_import_req: bool,
+    /// 已切入的精灵图帧（选择器展示用；键 = 帧序号）
+    pub icon_sheet: Vec<image::RgbaImage>,
+    /// "选用第 N 帧作为当前物品图标"请求（tick 中消费：存 PNG + 上传图集）
+    pub icon_pick: Option<usize>,
+    pub item_err: Option<String>,
 }
 
 /// 读取武器映射（文件缺失/损坏时用默认）
@@ -297,6 +312,20 @@ pub fn reload_if_changed(app: &mut GameApp) -> bool {
             app.editor.veg_mtime = Some(m);
         }
     }
+    // ---- items.ron：物品页打开时跳过（防丢编辑）----
+    if let Ok(m) = mtime(&crate::items::ItemDb::path()) {
+        let changed = app.editor.items_mtime.map(|b| b != m).unwrap_or(true);
+        let editing = app.editor.open && app.editor.tab == 4;
+        if changed && !editing {
+            match app.db.reload_from_disk() {
+                Ok(()) => tracing::info!("items.ron 热重载完成（{} 个物品）", app.db.defs.len()),
+                Err(e) => tracing::warn!("items.ron 重载失败: {e}"),
+            }
+            app.editor.items_mtime = Some(m);
+        } else if app.editor.items_mtime.is_none() {
+            app.editor.items_mtime = Some(m);
+        }
+    }
     // ---- WGSL 着色器热重载（改文件不重启）----
     for (i, (name, kind)) in SHADERS.iter().enumerate() {
         let path = shader_dir.join(name);
@@ -320,20 +349,22 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
         return;
     }
     egui::Window::new("编辑器 (F1)")
-        .default_width(420.0)
+        .default_width(760.0)
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.selectable_value(&mut app.editor.tab, 0, "特效");
                 ui.selectable_value(&mut app.editor.tab, 1, "动画");
                 ui.selectable_value(&mut app.editor.tab, 2, "植被");
                 ui.selectable_value(&mut app.editor.tab, 3, "人物");
+                ui.selectable_value(&mut app.editor.tab, 4, "物品");
             });
             ui.separator();
             match app.editor.tab {
                 0 => tab_vfx(ui, app),
                 1 => tab_anim(ui, app),
                 2 => tab_veg(ui, app),
-                _ => tab_char(ui, app),
+                3 => tab_char(ui, app),
+                _ => tab_items(ui, app),
             }
         });
 }
@@ -1027,4 +1058,262 @@ fn char_redo(app: &mut GameApp) {
         app.editor.char_stroke = false;
     }
     app.editor.char_dirty.push(key);
+}
+
+/// 物品页：左侧物品列表 + 保存；右侧按类型展示不同配置参数（选中即显示）
+fn tab_items(ui: &mut egui::Ui, app: &mut GameApp) {
+    use crate::items::Slot;
+    if app.editor.icon_path.is_empty() {
+        // 预填上次的精灵图路径（首次使用可直接导入）
+        app.editor.icon_path =
+            r"C:\Users\Huang\Downloads\Free - Raven Fantasy Icons\Full Spritesheet\64x64.png"
+                .to_string();
+    }
+    ui.columns(2, |cols| {
+        // ============ 左列：物品列表 / 新建 / 保存 ============
+        {
+            let ui = &mut cols[0];
+            ui.heading("物品库");
+            ui.separator();
+            ui.horizontal(|ui| {
+                let id_hint = ui.add(
+                    egui::TextEdit::singleline(&mut app.editor.item_new_id)
+                        .hint_text("新物品 id（英文）"),
+                );
+                let id = app.editor.item_new_id.trim().to_string();
+                if ui
+                    .add_enabled(!id.is_empty(), egui::Button::new("＋ 新建"))
+                    .clicked()
+                {
+                    if app.db.defs.contains_key(&id) {
+                        app.editor.item_err = Some(format!("id「{id}」已存在"));
+                    } else {
+                        app.db.defs.insert(
+                            id.clone(),
+                            crate::items::ItemDef {
+                                id: id.clone(),
+                                name: id.clone(),
+                                slot: Slot::Weapon,
+                                stack: 1,
+                                icon: None,
+                                dmg: 5.0,
+                                armor: 0.0,
+                                speed: 1.0,
+                                hp: 0.0,
+                                lvl: 1,
+                                value: 5,
+                                crit: 0.0,
+                                crit_dmg: 0.0,
+                            },
+                        );
+                        app.editor.item_sel = id;
+                        app.editor.item_new_id.clear();
+                    }
+                }
+                id_hint.request_focus();
+            });
+            ui.add_space(4.0);
+            egui::ScrollArea::vertical()
+                .max_height(400.0)
+                .show(ui, |ui| {
+                    let mut ids: Vec<String> = app.db.defs.keys().cloned().collect();
+                    ids.sort();
+                    for id in ids {
+                        let cat = app.db.defs[&id].category();
+                        if ui
+                            .selectable_label(app.editor.item_sel == id, format!("{id} · {cat}"))
+                            .clicked()
+                        {
+                            app.editor.item_sel = id;
+                        }
+                    }
+                });
+            ui.separator();
+            if ui.button("💾 保存 items.ron").clicked() {
+                match app.db.save() {
+                    Ok(()) => {
+                        app.editor.item_err = None;
+                        if let Ok(m) = std::fs::metadata(crate::items::ItemDb::path())
+                            .and_then(|m| m.modified().map_err(|e| e.into()))
+                        {
+                            app.editor.items_mtime = Some(m);
+                        }
+                    }
+                    Err(e) => app.editor.item_err = Some(format!("保存失败: {e}")),
+                }
+            }
+            if let Some(e) = &app.editor.item_err {
+                ui.colored_label(egui::Color32::RED, e);
+            }
+            ui.small("物品改动也可保存后经热重载进入游戏（背包/掉落/合成即时生效）");
+        }
+        // ============ 右列：选中物品的配置面板（按类型展示不同参数）============
+        {
+            let ui = &mut cols[1];
+            ui.heading("属性配置");
+            ui.separator();
+            let sel = app.editor.item_sel.clone();
+            let Some(def) = app.db.defs.get_mut(&sel) else {
+                ui.weak("← 从左侧选择物品，或输入 id 新建");
+                return;
+            };
+
+            // ---- 类型 ----
+            let cat = def.category();
+            ui.horizontal(|ui| {
+                ui.label("类型");
+                ComboBox::from_id_salt("item_cat")
+                    .selected_text(cat)
+                    .show_ui(ui, |ui| {
+                        for c in ["装备", "消耗品", "材料"] {
+                            if ui.selectable_label(cat == c, c).clicked() {
+                                match c {
+                                    "装备" => def.stack = 1,
+                                    "消耗品" => {
+                                        def.stack = 99;
+                                        def.hp = def.hp.max(30.0);
+                                        def.dmg = 0.0;
+                                        def.armor = 0.0;
+                                    }
+                                    _ => {
+                                        def.stack = 99;
+                                        def.hp = 0.0;
+                                        def.dmg = 0.0;
+                                        def.armor = 0.0;
+                                        def.speed = 1.0;
+                                    }
+                                }
+                            }
+                        }
+                    });
+                // 装备才有装备位
+                ui.add_enabled_ui(def.stack == 1, |ui| {
+                    ui.label("装备位");
+                    ComboBox::from_id_salt("item_slot")
+                        .selected_text(def.slot.name())
+                        .show_ui(ui, |ui| {
+                            let slots = [Slot::Weapon, Slot::Head, Slot::Chest, Slot::Legs, Slot::Trinket];
+                            for s in slots {
+                                if ui.selectable_label(def.slot == s, s.name()).clicked() {
+                                    def.slot = s;
+                                }
+                            }
+                        });
+                });
+            });
+            ui.add_space(4.0);
+
+            // ---- 基础信息 ----
+            ui.horizontal(|ui| {
+                ui.label("名称");
+                ui.text_edit_singleline(&mut def.name);
+            });
+            ui.horizontal(|ui| {
+                ui.label("价值");
+                ui.add(egui::DragValue::new(&mut def.value).range(0..=99999));
+                ui.label("等级");
+                ui.add(egui::DragValue::new(&mut def.lvl).range(1..=50));
+            });
+
+            // ---- 图标 ----
+            ui.horizontal(|ui| {
+                ui.label("图标");
+                match def.icon.clone() {
+                    Some(k) => match app.icons.egui_image(ui.ctx(), &k, 40.0) {
+                        Some(img) => {
+                            ui.add(img);
+                        }
+                        None => {
+                            ui.colored_label(egui::Color32::RED, "缺失");
+                        }
+                    },
+                    None => {
+                        ui.weak("未设置");
+                    }
+                }
+                ui.label("精灵图路径（64×64/帧）");
+                ui.add(
+                    egui::TextEdit::singleline(&mut app.editor.icon_path).desired_width(220.0),
+                );
+                if ui.button("📂 导入").clicked() {
+                    app.editor.icon_import_req = true;
+                }
+            });
+            if !app.editor.icon_sheet.is_empty() {
+                ui.small(format!(
+                    "已导入 {} 帧：点击选用为「{}」的图标",
+                    app.editor.icon_sheet.len(),
+                    def.name
+                ));
+                egui::ScrollArea::vertical()
+                    .id_salt("icon_pick_scroll")
+                    .max_height(160.0)
+                    .show(ui, |ui| {
+                        egui::Grid::new("icon_pick_grid")
+                            .spacing([2.0, 2.0])
+                            .show(ui, |ui| {
+                                let n = app.editor.icon_sheet.len();
+                                for i in 0..n {
+                                    let key = crate::icons::IconBank::sheet_key(i);
+                                    if let Some(img) =
+                                        app.icons.egui_image(ui.ctx(), &key, 34.0)
+                                    {
+                                        let resp = ui.add(img);
+                                        if resp.clicked() {
+                                            app.editor.icon_pick = Some(i);
+                                        }
+                                    }
+                                    if (i + 1) % 10 == 0 {
+                                        ui.end_row();
+                                    }
+                                }
+                            });
+                    });
+            }
+            ui.add_space(4.0);
+
+            // ---- 类型相关属性 ----
+            if def.stack == 1 {
+                ui.separator();
+                ui.label(match def.slot {
+                    Slot::Weapon => "武器属性",
+                    _ => "护甲/饰品属性",
+                });
+                egui::Grid::new("item_stats")
+                    .num_columns(4)
+                    .spacing([10.0, 4.0])
+                    .show(ui, |ui| {
+                        if def.slot == Slot::Weapon {
+                            ui.label("伤害");
+                            ui.add(egui::DragValue::new(&mut def.dmg).range(0.0..=999.0).speed(0.5));
+                            ui.label("攻速倍率");
+                            ui.add(egui::DragValue::new(&mut def.speed).range(0.3..=3.0).speed(0.05));
+                            ui.end_row();
+                            ui.label("暴击率%");
+                            ui.add(egui::DragValue::new(&mut def.crit).range(0.0..=100.0).speed(0.5));
+                            ui.label("暴击伤害%");
+                            ui.add(egui::DragValue::new(&mut def.crit_dmg).range(0.0..=500.0).speed(1.0));
+                            ui.end_row();
+                        } else {
+                            ui.label("护甲");
+                            ui.add(egui::DragValue::new(&mut def.armor).range(0.0..=999.0).speed(0.5));
+                            ui.end_row();
+                        }
+                    });
+            } else {
+                ui.separator();
+                if def.hp > 0.0 {
+                    ui.label("恢复效果");
+                    ui.add(egui::DragValue::new(&mut def.hp).range(0.0..=999.0).speed(1.0));
+                    ui.small("背包内点击/右键使用，恢复生命");
+                } else {
+                    ui.weak("合成材料：用于配方（合成区），无使用效果");
+                }
+                ui.horizontal(|ui| {
+                    ui.label("堆叠上限");
+                    ui.add(egui::DragValue::new(&mut def.stack).range(2..=999));
+                });
+            }
+        }
+    });
 }

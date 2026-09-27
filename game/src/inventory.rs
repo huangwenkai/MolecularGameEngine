@@ -319,6 +319,11 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
                             Some(it) => {
                                 let d = app.db.def(&it.def);
                                 ui.set_min_size(egui::vec2(64.0, 52.0));
+                                if let Some(k) = &d.icon {
+                                    if let Some(img) = app.icons.egui_image(ui.ctx(), k, 30.0) {
+                                        ui.add(img);
+                                    }
+                                }
                                 ui.colored_label(rarity_color32(&app.db, it), &d.name);
                                 ui.small(format!("{} {}", slot_label(d.slot), slot_stat_text(&app.db, it)));
                             }
@@ -382,6 +387,11 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
                     if let Some(it) = &app.inv.bag[idx] {
                         let d = app.db.def(&it.def);
                         ui.vertical(|ui| {
+                            if let Some(k) = &d.icon {
+                                if let Some(img) = app.icons.egui_image(ui.ctx(), k, 30.0) {
+                                    ui.add(img);
+                                }
+                            }
                             ui.colored_label(rarity_color32(&app.db, it), &d.name);
                             if it.count > 1 {
                                 ui.small(format!("×{}", it.count));

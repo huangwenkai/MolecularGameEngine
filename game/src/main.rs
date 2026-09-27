@@ -20,6 +20,7 @@ mod project;
 mod save;
 mod selftest;
 mod settings;
+mod icons;
 mod skills;
 mod tools;
 mod vfx;
@@ -60,6 +61,8 @@ pub struct GameApp {
     pub hitstop: u8,
     pub weapons: editor::WeaponFx,
     pub editor: editor::VfxEditor,
+    /// 物品图标库（图集 Region + egui 纹理缓存）
+    pub icons: icons::IconBank,
     pub db: items::ItemDb,
     pub inv: inventory::Inventory,
     pub drops: drops::Drops,
@@ -114,8 +117,8 @@ impl GameApp {
         projectiles.fx_hit_spark = weapons.hit_spark.clone();
         let vfx = vfx::Vfx::embedded();
         tracing::info!("初始化：特效库就绪");
-        let db = items::ItemDb::embedded();
-        tracing::info!("初始化：物品库就绪");
+        let db = items::ItemDb::load();
+        tracing::info!("初始化：物品库就绪（{} 个物品）", db.defs.len());
         let anims = anim::AnimBank::load();
         tracing::info!("初始化：动画库就绪");
         let mut audio = audio::Audio::new();
@@ -152,6 +155,7 @@ impl GameApp {
             hitstop: 0,
             weapons,
             editor: editor::VfxEditor::default(),
+            icons: icons::IconBank::default(),
             db,
             inv: inventory::Inventory::new(),
             drops: drops::Drops::default(),
@@ -309,6 +313,8 @@ impl App for GameApp {
         // 程序化美术 + 图集上传（含动画帧/人物部件打包）
         let art = art::build(ctx.renderer, &mut self.anims, &mut self.skin);
         self.regions = art.regions;
+        // 物品图标库（assets/icons/*.png → 图集）
+        self.icons.load_dir(ctx.renderer);
         // 调色板 + 世界/光照纹理
         let pal = art::palette(&self.world.mats);
         ctx.renderer.set_palette(&pal);
@@ -509,6 +515,66 @@ impl App for GameApp {
                         }
                     }
                     Err(e) => self.editor.anim_err = Some(e),
+                }
+            }
+        }
+
+        // ---- 物品编辑器：导入图标精灵图（切 64×64 帧，缓存像素供选择器预览）----
+        if self.editor.icon_import_req {
+            self.editor.icon_import_req = false;
+            self.editor.item_err = None;
+            let path = self.editor.icon_path.trim().to_string();
+            match image::open(&path).map(|i| i.to_rgba8()) {
+                Ok(img) => {
+                    let (w, h) = img.dimensions();
+                    let (cx, cy) = (w / 64, h / 64);
+                    if cx == 0 || cy == 0 {
+                        self.editor.item_err = Some("图太小（需 ≥64×64）".into());
+                    } else {
+                        let sheet: Vec<image::RgbaImage> = (0..cx * cy)
+                            .map(|i| {
+                                image::imageops::crop_imm(
+                                    &img,
+                                    (i % cx) * 64,
+                                    (i / cx) * 64,
+                                    64,
+                                    64,
+                                )
+                                .to_image()
+                            })
+                            .collect();
+                        let n = sheet.len();
+                        for (i, f) in sheet.iter().enumerate() {
+                            self.icons
+                                .store_pixels(&icons::IconBank::sheet_key(i), f.clone());
+                        }
+                        self.editor.icon_sheet = sheet;
+                        tracing::info!("图标精灵图导入：{n} 帧（{path}）");
+                    }
+                }
+                Err(e) => self.editor.item_err = Some(format!("读取失败: {e}")),
+            }
+        }
+        // ---- 物品编辑器：选用第 N 帧为当前物品图标（存 PNG + 上传图集）----
+        if let Some(i) = self.editor.icon_pick.take() {
+            let sel = self.editor.item_sel.clone();
+            if let Some(f) = self.editor.icon_sheet.get(i).cloned() {
+                let stem = std::path::Path::new(self.editor.icon_path.trim())
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("icons")
+                    .to_string();
+                let key = format!("{stem}_{i:04}");
+                let dir = project::dir_of("icons");
+                let _ = std::fs::create_dir_all(&dir);
+                if f.save(dir.join(format!("{key}.png"))).is_ok() {
+                    self.icons.register(ctx.renderer, &key, f);
+                    if let Some(d) = self.db.defs.get_mut(&sel) {
+                        d.icon = Some(key.clone());
+                    }
+                    tracing::info!("物品 {sel} 图标 → {key}");
+                } else {
+                    self.editor.item_err = Some("图标 PNG 保存失败".into());
                 }
             }
         }
