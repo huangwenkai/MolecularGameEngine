@@ -15,7 +15,11 @@ pub const LIGHT_CELL: i32 = 4;
 // 传播半径 = 亮度 / COST_AIR：火把 255 → 36 格 ≈ 145px 圆形光斑
 const COST_AIR: u8 = 7;
 const COST_SOLID: u8 = 24;
-/// 对角衰减（×√2：7→10 / 24→34），8 邻接传播使光斑呈圆形而非菱形
+/// 16 方向传播 + 3×3 平滑使光斑呈连续圆形（8 邻接的等距面是八边形）
+/// 各方向空气/实心衰减 = 边长 × COST_AIR / COST_SOLID：
+/// 正交 1 → 7/24；对角 √2 → 10/34；(2,1) √5 → 16/54
+const COST_KNIGHT: u8 = 16;
+const COST_SOLID_KNIGHT: u8 = 54;
 const COST_DIAG: u8 = 10;
 const COST_SOLID_DIAG: u8 = 34;
 /// 区域重算的外扩 margin（≥ 255/COST_AIR ≈ 36.4 格，保证光不会越过 margin 泄漏）
@@ -153,6 +157,9 @@ impl LightMap {
         let mut queue2: VecDeque<(u32, u8)> = VecDeque::with_capacity(1024);
         Self::seed_block(torches, 0, 0, cw - 1, ch - 1, self, &mut queue2);
         bfs_fill(&mut self.block, &mut queue2, cw, &opaque, (0, 0, cw - 1, ch - 1));
+        // 平滑：柔化等距面 → 连续圆形光斑
+        smooth(&mut self.sky, cw, (0, 0, cw - 1, ch - 1));
+        smooth(&mut self.block, cw, (0, 0, cw - 1, ch - 1));
     }
 
     /// 区域重算（每帧配额个，返回实际重算的区域列表供纹理区域上传）。
@@ -231,12 +238,14 @@ impl LightMap {
         // 3) 边界环天空种子（光从区域外正确流入）
         self.seed_ring(&self.sky, ex0, ey0, ex1, ey1, &mut queue);
         bfs_fill(&mut self.sky, &mut queue, self.cw, &opaque, (ex0, ey0, ex1, ey1));
+        smooth(&mut self.sky, self.cw, (ex0, ey0, ex1, ey1));
 
         // 4) 方块光：内圈光源种子 + 边界环种子
         let mut queue2: VecDeque<(u32, u8)> = VecDeque::with_capacity(1024);
         Self::seed_block(torches, ix0, iy0, ix1, iy1, self, &mut queue2);
         self.seed_ring(&self.block, ex0, ey0, ex1, ey1, &mut queue2);
         bfs_fill(&mut self.block, &mut queue2, self.cw, &opaque, (ex0, ey0, ex1, ey1));
+        smooth(&mut self.block, self.cw, (ex0, ey0, ex1, ey1));
         Some((ex0, ey0, ex1, ey1))
     }
 
@@ -286,6 +295,7 @@ impl LightMap {
         Self::seed_block(torches, ix0, iy0, ix1, iy1, self, &mut queue2);
         self.seed_ring(&self.block, ex0, ey0, ex1, ey1, &mut queue2);
         bfs_fill(&mut self.block, &mut queue2, self.cw, &opaque, (ex0, ey0, ex1, ey1));
+        smooth(&mut self.block, self.cw, (ex0, ey0, ex1, ey1));
         Some((ex0, ey0, ex1, ey1))
     }
 
@@ -395,8 +405,8 @@ impl LightMap {
     }
 }
 
-/// 8 邻接方向与对应衰减（正交 / 对角）——等距面为圆形
-const NEIGH: [(i32, i32, u8, u8); 8] = [
+/// 16 方向与对应衰减（正交 / 对角 / (2,1)）——等距面近似圆形
+const NEIGH: [(i32, i32, u8, u8); 16] = [
     (-1, 0, COST_AIR, COST_SOLID),
     (1, 0, COST_AIR, COST_SOLID),
     (0, -1, COST_AIR, COST_SOLID),
@@ -405,10 +415,19 @@ const NEIGH: [(i32, i32, u8, u8); 8] = [
     (1, -1, COST_DIAG, COST_SOLID_DIAG),
     (-1, 1, COST_DIAG, COST_SOLID_DIAG),
     (1, 1, COST_DIAG, COST_SOLID_DIAG),
+    (-2, -1, COST_KNIGHT, COST_SOLID_KNIGHT),
+    (2, -1, COST_KNIGHT, COST_SOLID_KNIGHT),
+    (-2, 1, COST_KNIGHT, COST_SOLID_KNIGHT),
+    (2, 1, COST_KNIGHT, COST_SOLID_KNIGHT),
+    (-1, -2, COST_KNIGHT, COST_SOLID_KNIGHT),
+    (1, -2, COST_KNIGHT, COST_SOLID_KNIGHT),
+    (-1, 2, COST_KNIGHT, COST_SOLID_KNIGHT),
+    (1, 2, COST_KNIGHT, COST_SOLID_KNIGHT),
 ];
 
-/// 光传播：8 邻接 + 两档边权 → 按亮度降序的桶式 Dijkstra（等距面为圆形）。
+/// 光传播：16 邻接 + 多档边权 → 按亮度降序的桶式 Dijkstra（等距面近似圆形）。
 /// 入队 seeds（值, 格索引）；同层处理期间只可能写入更低的桶，降序遍历即正确。
+/// (2,1)/(1,2) 类长步会跨格穿角：要求中途格与落点均非实心。
 fn bfs_fill(
     map: &mut [u8],
     queue: &mut VecDeque<(u32, u8)>,
@@ -436,6 +455,10 @@ fn bfs_fill(
                 if nx < bx0 || ny < by0 || nx > bx1 || ny > by1 {
                     continue;
                 }
+                // 长步（|dx|+|dy|==3）防穿角：中途格必须可通行
+                if dx.abs() + dy.abs() == 3 && opaque(x + dx / 2, y + dy / 2) {
+                    continue;
+                }
                 let ni = (ny * cw + nx) as usize;
                 let nv = v.saturating_sub(if opaque(nx, ny) { cs } else { ca });
                 if nv > map[ni] {
@@ -447,4 +470,32 @@ fn bfs_fill(
             }
         }
     }
+}
+
+/// 3×3 均值平滑：把多边形等距面柔化成连续圆形渐变（只写 bounds 内）
+fn smooth(map: &mut [u8], cw: i32, bounds: (i32, i32, i32, i32)) {
+    let (bx0, by0, bx1, by1) = bounds;
+    let src = map.to_vec();
+    for cy in by0..=by1 {
+        for cx in bx0..=bx1 {
+            let i = (cy * cw + cx) as usize;
+            if src[i] == 0 {
+                continue;
+            }
+            let mut sum = 0u32;
+            for dy in -1..=1i32 {
+                for dx in -1..=1i32 {
+                    let nx = (cx + dx).clamp(0, cw - 1);
+                    let ny = (cy + dy).clamp(0, ch_of(cw, src.len()) - 1);
+                    sum += src[(ny * cw + nx) as usize] as u32;
+                }
+            }
+            map[i] = (sum / 9).min(255) as u8;
+        }
+    }
+}
+
+#[inline]
+fn ch_of(cw: i32, len: usize) -> i32 {
+    (len as i32 / cw.max(1)).max(1)
 }
