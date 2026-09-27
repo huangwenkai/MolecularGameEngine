@@ -11,6 +11,74 @@ pub fn anims_dir() -> std::path::PathBuf {
     crate::project::dir_of("anims")
 }
 
+/// 怪物动画状态（由 AI/行为映射）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MonAnimState {
+    /// 待机（站立）
+    Idle,
+    /// 移动（走/跑/飞）
+    Walk,
+    /// 攻击
+    Attack,
+    /// 受击
+    Hurt,
+}
+
+/// 递归收集目录（含子目录）下的 PNG
+fn collect_png(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    for e in rd.flatten() {
+        let p = e.path();
+        if p.is_dir() {
+            collect_png(&p, out);
+        } else if p.extension().and_then(|s| s.to_str()) == Some("png") {
+            out.push(p);
+        }
+    }
+}
+
+/// 文件名关键字 → 怪物动画名（保留状态后缀：base_state；其余沿用文件名）
+fn monster_anim_name(stem: &str) -> String {
+    let s = stem.to_ascii_lowercase().replace(' ', "");
+    let base = [
+        ("skeleton", "mon_skeleton"),
+        ("mushroom", "mon_mushroom"),
+        ("goblin", "mon_goblin"),
+        ("flyingeye", "mon_eyebat"),
+        ("eyebat", "mon_eyebat"),
+        ("bat", "mon_eyebat"),
+        ("slime", "mon_slime"),
+    ]
+    .iter()
+    .find(|(k, _)| s.contains(k))
+    .map(|(_, v)| *v);
+    let Some(base) = base else {
+        return s.replace([' ', '-'], "_");
+    };
+    // 状态后缀（LuizMelo 命名：Idle/Run/Walk/Attack/Take Hit/Flight/Death/Shield）
+    let state = [
+        ("idle", "idle"),
+        ("walk", "walk"),
+        ("run", "run"),
+        ("attack", "attack"),
+        ("takehit", "hurt"),
+        ("take_hit", "hurt"),
+        ("hurt", "hurt"),
+        ("flight", "fly"),
+        ("fly", "fly"),
+        ("death", "death"),
+        ("shield", "shield"),
+    ]
+    .iter()
+    .find(|(k, _)| s.contains(k))
+    .map(|(_, v)| *v);
+    match state {
+        Some(st) => format!("{base}_{st}"),
+        None => base.to_string(),
+    }
+}
+
+
 fn default_loop() -> bool {
     true
 }
@@ -128,6 +196,110 @@ impl AnimBank {
         self.counts.insert(def.name.clone(), frames.len() as u32);
         self.defs.insert(def.name.clone(), def);
         Ok(())
+    }
+
+    /// 取怪物当前状态动画帧（回退链：请求状态 → idle/fly → None）
+    pub fn monster_frame(
+        &self,
+        kind: &crate::monsters::Kind,
+        state: MonAnimState,
+        t: f32,
+    ) -> Option<Region> {
+        let base = kind.anim_base()?;
+        let sname = match state {
+            MonAnimState::Idle => "idle",
+            MonAnimState::Walk => "walk",
+            MonAnimState::Attack => "attack",
+            MonAnimState::Hurt => "hurt",
+        };
+        let mut key = format!("{base}_{sname}");
+        if !self.counts.contains_key(&key) {
+            key = if base == "mon_eyebat" {
+                format!("{base}_fly")
+            } else {
+                format!("{base}_idle")
+            };
+            if !self.counts.contains_key(&key) {
+                return None;
+            }
+        }
+        let n = self.counts.get(&key).copied().unwrap_or(0);
+        if n == 0 {
+            return None;
+        }
+        let i = ((t * 10.0).floor() as u32) % n;
+        self.frames.get(&format!("anim:{key}:{i}")).copied()
+    }
+
+    /// 批量导入精灵表：递归扫描目录下 PNG，按帧尺寸切帧，最近邻缩放到 64×64
+    /// 并重排为紧凑网格（避免大序列条塞爆图集），注册动画。
+    /// 文件名按关键字映射到怪物动画名（skeleton/mushroom/goblin/eyebat|bat）。
+    pub fn import_sheets(&mut self, dir: &str, fw: u32, fh: u32) -> (usize, Vec<String>) {
+        const OUT: u32 = 64; // 导出帧尺寸（怪物在屏上约 18px，64px 足够清晰）
+        let mut ok = Vec::new();
+        let mut files: Vec<std::path::PathBuf> = Vec::new();
+        collect_png(std::path::Path::new(dir), &mut files);
+        files.sort();
+        for src in files {
+            let stem = src
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("sheet")
+                .to_ascii_lowercase();
+            // 怪物名在父目录（如 "Skeleton/Attack.png"）→ 拼接后映射
+            let parent = src
+                .parent()
+                .and_then(|p| p.file_name())
+                .and_then(|s| s.to_str())
+                .unwrap_or("");
+            let name = monster_anim_name(&format!("{parent} {stem}"));
+            if !name.starts_with("mon_") {
+                continue; // 非怪物素材（如 All Characters 合集图）跳过
+            }
+            let Ok(img) = image::open(&src) else { continue };
+            let (w, h) = (img.width(), img.height());
+            if w < fw || h < fh {
+                continue;
+            }
+            let (fx_n, fy_n) = (w / fw, h / fh);
+            let total = fx_n * fy_n;
+            // 组合网格：ceil(sqrt(total)) 列
+            let cols = ((total as f32).sqrt().ceil()) as u32;
+            let rows = (total + cols - 1) / cols;
+            let mut sheet = image::RgbaImage::new(cols * OUT, rows * OUT);
+            for i in 0..total {
+                let (sx, sy) = ((i % fx_n) * fw, (i / fx_n) * fh);
+                let frame = image::imageops::resize(
+                    &image::imageops::crop_imm(&img, sx, sy, fw, fh).to_image(),
+                    OUT,
+                    OUT,
+                    image::imageops::FilterType::Nearest,
+                );
+                let (ox, oy) = ((i % cols) * OUT, (i / cols) * OUT);
+                image::imageops::replace(&mut sheet, &frame, ox as i64, oy as i64);
+            }
+            let target_dir = crate::project::dir_of("anims");
+            let _ = std::fs::create_dir_all(&target_dir);
+            let file = format!("{name}.png");
+            if sheet.save(target_dir.join(&file)).is_err() {
+                continue;
+            }
+            self.defs.insert(
+                name.clone(),
+                AnimDef {
+                    name: name.clone(),
+                    sheet: file,
+                    frame_w: OUT,
+                    frame_h: OUT,
+                    frame_times: vec![0.12; total as usize],
+                    events: Vec::new(),
+                    r#loop: true,
+                },
+            );
+            self.counts.insert(name.clone(), 0);
+            ok.push(name);
+        }
+        (ok.len(), ok)
     }
 
     /// 保存全部定义到 animations.ron

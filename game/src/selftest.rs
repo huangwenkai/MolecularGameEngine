@@ -949,6 +949,15 @@ pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
         1322 => {
             input.inject(mge_platform::action::Action::Dodge, RELEASE);
             let spawned_ok = SPAWN_OK.get().copied().unwrap_or(false);
+            // 素材绑定：骷髅士兵移动动画帧已入库
+            let tex_ok = game
+                .anims
+                .monster_frame(
+                    &crate::monsters::Kind::SkeletonSoldier,
+                    crate::anim::MonAnimState::Walk,
+                    0.0,
+                )
+                .is_some();
             let dodging = game.player.dodge_t > 0.15;
             let invuln_ok = game.player.invuln > 0.2;
             let cd_ok = game.player.dodge_cd > 0.8;
@@ -963,7 +972,7 @@ pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
             });
             println!(
                 "[SELFTEST] 玩家动作与闪避 {} | 冲刺 {:.2} 无敌 {:.2} 冷却 {:.2} 新怪物在场 {has_new}",
-                if dodging && invuln_ok && cd_ok && spawned_ok && has_new { "PASS" } else { "FAIL" },
+                if dodging && invuln_ok && cd_ok && spawned_ok && has_new && tex_ok { "PASS" } else { "FAIL" },
                 game.player.dodge_t,
                 game.player.invuln,
                 game.player.dodge_cd,

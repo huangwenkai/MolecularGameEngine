@@ -1058,7 +1058,8 @@ impl App for GameApp {
         self.vfx
             .render(batch, white, tl, Vec2::new(tl.x + vw, tl.y + vh));
         self.drops.render(batch, &self.db, white, tl, Vec2::new(tl.x + vw, tl.y + vh));
-        self.monsters.render(batch, white, tl, Vec2::new(tl.x + vw, tl.y + vh));
+        self.monsters
+            .render(batch, white, tl, Vec2::new(tl.x + vw, tl.y + vh), &self.anims);
         npc::render(&self.npcs.list, batch, white, tl, Vec2::new(tl.x + vw, tl.y + vh));
 
         // ---- F3 调试叠加（chunk 休眠态 / 碰撞框）----
@@ -1098,6 +1099,20 @@ impl App for GameApp {
 fn main() {
     mge_core::logging::init();
     let args: Vec<String> = std::env::args().collect();
+
+    // ---- 批量导入怪物精灵表：--import-sheets <目录> <帧宽> <帧高> ----
+    if let Some(p) = args.iter().position(|a| a == "--import-sheets") {
+        let dir = args.get(p + 1).map(|s| s.as_str()).unwrap_or("assets_raw");
+        let fw = args.get(p + 2).and_then(|s| s.parse().ok()).unwrap_or(150u32);
+        let fh = args.get(p + 3).and_then(|s| s.parse().ok()).unwrap_or(150u32);
+        let mut bank = anim::AnimBank::load();
+        let (n, names) = bank.import_sheets(dir, fw, fh);
+        match bank.save() {
+            Ok(_) => tracing::info!("导入完成：{n} 张精灵表 [{names:?}]（帧 {fw}×{fh}）→ animations.ron"),
+            Err(e) => tracing::error!("保存失败: {e}"),
+        }
+        return;
+    }
     let mut engine = Engine::new((1280, 720));
     if args.iter().any(|a| a == "--selftest") {
         tracing::info!("自测模式启动");

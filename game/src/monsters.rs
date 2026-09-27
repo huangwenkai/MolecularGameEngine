@@ -45,8 +45,8 @@ impl Kind {
         }
     }
 
-    /// 绑定的动画名（素材导入后从 animations.ron 取帧；无素材时回退程序化方块）
-    pub fn anim_name(&self) -> Option<&'static str> {
+    /// 绑定的动画基础名（animations.ron 中为 <base>_<state>；无素材时回退程序化色块）
+    pub fn anim_base(&self) -> Option<&'static str> {
         Some(match self {
             Kind::SkeletonSoldier => "mon_skeleton",
             Kind::DemonMushroom => "mon_mushroom",
@@ -141,6 +141,8 @@ pub struct Monster {
     pub path_i: usize,
     /// 路径重算冷却
     pub path_cd: f32,
+    /// 攻击动画剩余时间（接触伤害/发射弹丸时置位）
+    pub attack_anim: f32,
 }
 
 impl Monster {
@@ -225,6 +227,7 @@ impl Monsters {
             path: Vec::new(),
             path_i: 0,
             path_cd: 0.0,
+            attack_anim: 0.0,
         });
         if kind == Kind::Boss {
             self.boss_alive = true;
@@ -431,6 +434,7 @@ impl Monsters {
                     m.face = to_p.x.signum();
                     if m.state == AiState::Chase && m.atk_cd <= 0.0 && dist < 300.0 {
                         m.atk_cd = 1.8;
+                        m.attack_anim = 0.5;
                         let v = (pcenter - (m.pos - Vec2::new(0.0, m.half.y))).normalize_or_zero() * 210.0;
                         self.bullets.push(Bullet {
                             pos: m.pos - Vec2::new(0.0, m.half.y),
@@ -584,6 +588,7 @@ impl Monsters {
                 );
                 let pa = Aabb::new(*ppos - Vec2::new(0.0, phalf.y * 2.0), *phalf * 2.0);
                 if ma.intersects(&pa) {
+                    m.attack_anim = 0.4;
                     let d = m.dmg * (1.0 + if rage { 0.5 } else { 0.0 }) * (1.0 - mit);
                     *php -= d;
                     hurt += d;
@@ -683,13 +688,14 @@ impl Monsters {
         });
     }
 
-    /// 渲染
+    /// 渲染（有绑定贴图时按状态显示精灵帧，否则回退程序化色块）
     pub fn render(
         &self,
         batch: &mut mge_render::SpriteBatch,
         white: &mge_render::Region,
         tl: Vec2,
         br: Vec2,
+        anims: &crate::anim::AnimBank,
     ) {
         for m in &self.list {
             if m.pos.x < tl.x - 24.0 || m.pos.x > br.x + 24.0 || m.pos.y < tl.y - 24.0
@@ -721,7 +727,28 @@ impl Monsters {
                 0.0
             };
             let c = m.pos + Vec2::new(0.0, -m.half.y + bob);
-            batch.push_at(c, m.half * 2.0, white, col);
+            // 状态动画：攻击 > 受击 > 移动 > 待机
+            let moving = m.vel.x.abs() > 8.0 || m.state == AiState::Chase;
+            let mstate = if m.attack_anim > 0.0 {
+                crate::anim::MonAnimState::Attack
+            } else if m.flash > 0.0 {
+                crate::anim::MonAnimState::Hurt
+            } else if moving || m.kind.flies() {
+                crate::anim::MonAnimState::Walk
+            } else {
+                crate::anim::MonAnimState::Idle
+            };
+            if let Some(r) = anims.monster_frame(&m.kind, mstate, m.anim) {
+                let scale = (m.half.y * 2.0 / r.size[1].max(1.0)).max(0.1);
+                batch.push_at(
+                    c,
+                    Vec2::new(r.size[0] * scale, r.size[1] * scale),
+                    &r,
+                    col,
+                );
+            } else {
+                batch.push_at(c, m.half * 2.0, white, col);
+            }
             // 眼睛（面向）
             batch.push_at(
                 c + Vec2::new(m.face * m.half.x * 0.4, -m.half.y * 0.3),
