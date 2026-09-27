@@ -1249,19 +1249,47 @@ fn tab_items(ui: &mut egui::Ui, app: &mut GameApp) {
                     .id_salt("icon_pick_scroll")
                     .max_height(160.0)
                     .show(ui, |ui| {
+                        // 当前图标若来自本精灵图 → 解析帧序号用于金框标识
+                        let sheet_stem = std::path::Path::new(app.editor.icon_path.trim())
+                            .file_stem()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or("icons")
+                            .to_string();
+                        let cur_idx = def.icon.as_ref().and_then(|k| {
+                            k.strip_prefix(&format!("{sheet_stem}_"))
+                                .and_then(|s| s.parse::<usize>().ok())
+                        });
                         egui::Grid::new("icon_pick_grid")
                             .spacing([2.0, 2.0])
                             .show(ui, |ui| {
                                 let n = app.editor.icon_sheet.len();
                                 for i in 0..n {
                                     let key = crate::icons::IconBank::sheet_key(i);
-                                    if let Some(img) =
-                                        app.icons.egui_image(ui.ctx(), &key, 34.0)
-                                    {
-                                        let resp = ui.add(img);
-                                        if resp.clicked() {
-                                            app.editor.icon_pick = Some(i);
-                                        }
+                                    let sel = cur_idx == Some(i);
+                                    // 金框 = 当前物品已选用的图标；悬停 = 白框提示可点
+                                    let stroke = if sel {
+                                        egui::Stroke::new(2.0_f32, egui::Color32::GOLD)
+                                    } else {
+                                        egui::Stroke::NONE
+                                    };
+                                    let r = egui::Frame::NONE
+                                        .stroke(stroke)
+                                        .inner_margin(1.0)
+                                        .show(ui, |ui| {
+                                            if let Some(img) =
+                                                app.icons.egui_image(ui.ctx(), &key, 32.0)
+                                            {
+                                                ui.add(img.sense(egui::Sense::click()));
+                                            } else {
+                                                ui.weak("?");
+                                            }
+                                        })
+                                        .response;
+                                    if r.clicked() {
+                                        app.editor.icon_pick = Some(i);
+                                    }
+                                    if r.hovered() && !sel {
+                                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                                     }
                                     if (i + 1) % 10 == 0 {
                                         ui.end_row();
@@ -1269,6 +1297,7 @@ fn tab_items(ui: &mut egui::Ui, app: &mut GameApp) {
                                 }
                             });
                     });
+                ui.small("金框 = 当前选中；点击选用");
             }
             ui.add_space(4.0);
 
