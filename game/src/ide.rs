@@ -154,9 +154,8 @@ fn prop(ui: &mut egui::Ui, k: &str, v: impl Into<String>) {
 }
 
 /// 分组标题（树内小节）
-fn group(ui: &mut egui::Ui, icon: &str, name: &str, count: usize) {
+fn group(ui: &mut egui::Ui, name: &str, count: usize) {
     ui.horizontal(|ui| {
-        ui.colored_label(ACCENT, icon);
         ui.weak(name);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.colored_label(DIM, RichText::new(format!("{count}")).small());
@@ -201,7 +200,7 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
                 .id_salt("ide_left_scroll")
                 .show(ui, |ui| {
                 // ---- 工程 ----
-                section(ui, "🗂 工程", &mut app.ide.sec_proj, |ui| {
+                section(ui, "工程", &mut app.ide.sec_proj, |ui| {
                     ui.horizontal(|ui| {
                         ui.label("新建");
                         ui.text_edit_singleline(&mut app.project.new_name);
@@ -247,16 +246,10 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
                 });
 
                 // ---- 素材树 ----
-                section(ui, "📦 素材", &mut app.ide.sec_assets, |ui| {
-                    let icons = ["📊", "🧩", "🖼", "🧍", "💾"];
+                section(ui, "素材", &mut app.ide.sec_assets, |ui| {
                     for (kind, (label, _d, _e)) in project::GROUPS.iter().enumerate() {
                         let files = project::list_group(kind);
-                        egui::CollapsingHeader::new(format!(
-                            "{} {} ({})",
-                            icons[kind],
-                            label,
-                            files.len()
-                        ))
+                        egui::CollapsingHeader::new(format!("{} ({})", label, files.len()))
                         .id_salt(format!("ide_assets_group_{kind}"))
                         .default_open(kind == 0)
                         .show(ui, |ui| {
@@ -277,8 +270,8 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
                 });
 
                 // ---- 场景树 ----
-                section(ui, "🌳 场景", &mut app.ide.sec_scene, |ui| {
-                    group(ui, "🧍", "玩家", 1);
+                section(ui, "场景", &mut app.ide.sec_scene, |ui| {
+                    group(ui, "玩家", 1);
                     if ui
                         .selectable_label(app.ide.ent == Some(EntSel::Player), "玩家")
                         .clicked()
@@ -286,7 +279,7 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
                         app.ide.ent = Some(EntSel::Player);
                         app.ide.sel = None;
                     }
-                    group(ui, "👾", "怪物", app.monsters.list.len());
+                    group(ui, "怪物", app.monsters.list.len());
                     for i in 0..app.monsters.list.len() {
                         let m = &app.monsters.list[i];
                         let label = format!("{}  生命 {:.0}", m.kind.name(), m.hp);
@@ -298,7 +291,7 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
                             app.ide.sel = None;
                         }
                     }
-                    group(ui, "🧑", "居民", app.npcs.list.len());
+                    group(ui, "居民", app.npcs.list.len());
                     for i in 0..app.npcs.list.len() {
                         let n = &app.npcs.list[i];
                         let label = format!("居民 {}  {}", i, n.state.name());
@@ -315,7 +308,7 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
                     let dummies: Vec<(hecs::Entity, glam::Vec2, f32)> =
                         q.iter().map(|(e, (tr, d))| (e, tr.pos, d.hp)).collect();
                     drop(q);
-                    group(ui, "🎯", "假人", dummies.len());
+                    group(ui, "假人", dummies.len());
                     for (e, pos, hp) in dummies {
                         let label = format!("假人 ({:.0},{:.0}) 生命 {:.0}", pos.x, pos.y, hp);
                         if ui
@@ -355,7 +348,7 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
                 .show(ui, |ui| {
                 // ---- 实体属性 ----
                 let mut open = app.ide.sec_ent;
-                section(ui, "🧩 实体属性", &mut open, |ui| {
+                section(ui, "实体属性", &mut open, |ui| {
                     match app.ide.ent {
                         None => {
                             ui.weak("未选中实体（左侧场景树点选）");
@@ -366,13 +359,13 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
                 app.ide.sec_ent = open;
                 // ---- 文件 ----
                 let mut open = app.ide.sec_file;
-                section(ui, "📄 文件", &mut open, |ui| {
+                section(ui, "文件", &mut open, |ui| {
                     draw_file_props(ui, app);
                 });
                 app.ide.sec_file = open;
                 // ---- 素材工具 ----
                 let mut open = app.ide.sec_tools;
-                section(ui, "🛠 素材工具", &mut open, |ui| {
+                section(ui, "素材工具", &mut open, |ui| {
                     draw_asset_tools(ui, app);
                 });
                 app.ide.sec_tools = open;
@@ -401,18 +394,18 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
                     ui.horizontal(|ui| {
                         let t0 = if app.ide.tab == 0 { ACCENT } else { DIM };
                         let t1 = if app.ide.tab == 1 { ACCENT } else { DIM };
-                        if ui.button(RichText::new("🎬 视口").color(t0)).clicked() {
+                        if ui.button(RichText::new("视口").color(t0)).clicked() {
                             app.ide.tab = 0;
                         }
-                        if ui.button(RichText::new("📄 文件").color(t1)).clicked() {
+                        if ui.button(RichText::new("文件").color(t1)).clicked() {
                             app.ide.tab = 1;
                         }
                         ui.separator();
                         if app.ide.tab == 0 {
                             let (txt, col) = if app.ide.run {
-                                ("⏸ 暂停", WARN)
+                                ("暂停", WARN)
                             } else {
-                                ("▶ 运行", OK)
+                                ("运行", OK)
                             };
                             if ui.button(RichText::new(txt).color(col)).clicked() {
                                 app.ide.run = !app.ide.run;
@@ -430,7 +423,7 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
                                 let st = if app.ide.run { "运行中" } else { "已暂停" };
                                 ui.colored_label(
                                     if app.ide.run { OK } else { WARN },
-                                    format!("● {st}"),
+                                    format!("{st}"),
                                 );
                                 ui.weak(proj.clone().unwrap_or_else(|| "内置资源".into()));
                             },
@@ -551,11 +544,11 @@ fn draw_file_props(ui: &mut egui::Ui, app: &mut GameApp) {
         ui.colored_label(ERR, err);
     }
     ui.horizontal(|ui| {
-        if ui.button("📂 打开目录").clicked() {
+        if ui.button("打开目录").clicked() {
             let dir = sel.parent().map(|p| p.to_path_buf()).unwrap_or_default();
             let _ = std::process::Command::new("explorer").arg(dir).spawn();
         }
-        if ui.button("📋 复制路径").clicked() {
+        if ui.button("复制路径").clicked() {
             ui.ctx().copy_text(sel.display().to_string());
         }
     });
@@ -592,7 +585,7 @@ fn draw_file_props(ui: &mut egui::Ui, app: &mut GameApp) {
     ui.horizontal(|ui| {
         ui.checkbox(&mut app.ide.confirm_del, "确认删除");
         if ui
-            .add_enabled(app.ide.confirm_del, egui::Button::new("🗑 删除"))
+            .add_enabled(app.ide.confirm_del, egui::Button::new("删除"))
             .clicked()
         {
             match std::fs::remove_file(&sel) {
@@ -609,7 +602,7 @@ fn draw_file_props(ui: &mut egui::Ui, app: &mut GameApp) {
 }
 
 fn draw_asset_tools(ui: &mut egui::Ui, app: &mut GameApp) {
-    egui::CollapsingHeader::new("📥 导入精灵表")
+    egui::CollapsingHeader::new("导入精灵表")
         .id_salt("ide_import_sheet")
         .default_open(false)
         .show(ui, |ui| {
@@ -633,7 +626,7 @@ fn draw_asset_tools(ui: &mut egui::Ui, app: &mut GameApp) {
             }
             ui.weak("PNG 复制到工程 anims/ 并写入 animations.ron，热重载即时生效");
         });
-    if ui.button("📦 导出工程副本").clicked() {
+    if ui.button("导出工程副本").clicked() {
         export_project(app);
     }
     if let Some(m) = &app.ide.export_msg {
@@ -735,14 +728,14 @@ fn draw_file_view(ui: &mut egui::Ui, app: &mut GameApp) {
         );
         if is_text(&sel) {
             if app.ide.dirty {
-                ui.colored_label(WARN, "● 已修改未保存");
+                ui.colored_label(WARN, "已修改未保存");
             } else {
-                ui.colored_label(OK, "● 已保存");
+                ui.colored_label(OK, "已保存");
             }
-            if ui.button("💾 保存 (Ctrl+S)").clicked() {
+            if ui.button("保存 (Ctrl+S)").clicked() {
                 save_text(app);
             }
-            if ui.button("↺ 重载").clicked() {
+            if ui.button("重载").clicked() {
                 app.ide.text_of = None;
                 app.ide.dirty = false;
             }
