@@ -12,6 +12,8 @@ use winit::event::ElementState;
 const PRESS: ElementState = ElementState::Pressed;
 /// IDE 视口测试：记录开 IDE 前的世界时间基准
 static IDE_T0: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+/// 玩家动作测试：新怪物是否生成成功
+static SPAWN_OK: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
 const RELEASE: ElementState = ElementState::Released;
 
 const SHOTS: &[(u64, &str)] = &[
@@ -909,6 +911,51 @@ pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
             );
             let _ = ();
             game.ide.open = false;
+
+            // ---- 玩家动作与闪避：四种新怪物生成 + Shift 闪避冲刺/无敌 ----
+            let gy = game.player.pos.y;
+            let kinds = [
+                crate::monsters::Kind::SkeletonSoldier,
+                crate::monsters::Kind::DemonMushroom,
+                crate::monsters::Kind::Goblin,
+                crate::monsters::Kind::EyeBat,
+            ];
+            let n0 = game.monsters.list.len();
+            for (i, k) in kinds.iter().enumerate() {
+                game.monsters.test_spawn(
+                    *k,
+                    Vec2::new(game.player.pos.x + 200.0 + i as f32 * 30.0, gy - 2.0),
+                    &mut game.rng,
+                );
+            }
+            let _ = SPAWN_OK.set(game.monsters.list.len() == n0 + 4);
+            let new_ok = game.monsters.list.len() == n0 + 4;
+            game.player.dodge_cd = 0.0;
+            input.inject(mge_platform::action::Action::Dodge, PRESS);
+        }
+        // 闪避注入后第 2 帧断言（冲刺/无敌进行中）
+        1322 => {
+            input.inject(mge_platform::action::Action::Dodge, RELEASE);
+            let spawned_ok = SPAWN_OK.get().copied().unwrap_or(false);
+            let dodging = game.player.dodge_t > 0.15;
+            let invuln_ok = game.player.invuln > 0.2;
+            let cd_ok = game.player.dodge_cd > 0.8;
+            let has_new = game.monsters.list.iter().any(|m| {
+                matches!(
+                    m.kind,
+                    crate::monsters::Kind::SkeletonSoldier
+                        | crate::monsters::Kind::DemonMushroom
+                        | crate::monsters::Kind::Goblin
+                        | crate::monsters::Kind::EyeBat
+                )
+            });
+            println!(
+                "[SELFTEST] 玩家动作与闪避 {} | 冲刺 {:.2} 无敌 {:.2} 冷却 {:.2} 新怪物在场 {has_new}",
+                if dodging && invuln_ok && cd_ok && spawned_ok && has_new { "PASS" } else { "FAIL" },
+                game.player.dodge_t,
+                game.player.invuln,
+                game.player.dodge_cd,
+            );
         }
         _ => {}
     }

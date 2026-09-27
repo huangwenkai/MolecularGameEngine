@@ -34,6 +34,10 @@ pub enum Action {
     Skill3,
     /// 引擎 IDE（工程/素材管理）
     ToggleIde,
+    /// 闪避（翻滚冲刺，短暂无敌）
+    Dodge,
+    /// 慢走（按住）
+    Walk,
 }
 
 pub struct ActionMap {
@@ -81,6 +85,8 @@ impl ActionMap {
         put(KeyCode::KeyX, Action::Skill2);
         put(KeyCode::KeyC, Action::Skill3);
         put(KeyCode::F4, Action::ToggleIde);
+        put(KeyCode::ShiftLeft, Action::Dodge);
+        put(KeyCode::ControlLeft, Action::Walk);
         Self { keys }
     }
 

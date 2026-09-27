@@ -104,6 +104,8 @@ pub fn action_name(a: Action) -> &'static str {
         Action::Skill2 => "skill2",
         Action::Skill3 => "skill3",
         Action::ToggleIde => "ide",
+        Action::Dodge => "dodge",
+        Action::Walk => "walk",
     }
 }
 
@@ -134,6 +136,8 @@ pub fn action_from_name(s: &str) -> Option<Action> {
         "skill2" => Action::Skill2,
         "skill3" => Action::Skill3,
         "ide" => Action::ToggleIde,
+        "dodge" => Action::Dodge,
+        "walk" => Action::Walk,
         _ => return None,
     })
 }
@@ -162,6 +166,8 @@ const REBINDABLE: &[Action] = &[
     Action::Skill2,
     Action::Skill3,
     Action::ToggleIde,
+    Action::Dodge,
+    Action::Walk,
 ];
 
 /// 动作中文名（UI 展示）
@@ -192,6 +198,8 @@ fn action_label(a: Action) -> &'static str {
         Action::Skill2 => "技能 2 · 火焰新星",
         Action::Skill3 => "技能 3 · 治疗术",
         Action::ToggleIde => "引擎 IDE（工程/素材）",
+        Action::Dodge => "闪避",
+        Action::Walk => "慢走（按住）",
     }
 }
 
@@ -288,6 +296,8 @@ impl SettingsUi {
                         row(ui, "调试面板", &key_of(map, Action::ToggleDebug));
                         row(ui, "特效编辑器", &key_of(map, Action::ToggleEditor));
                         row(ui, "引擎 IDE", &key_of(map, Action::ToggleIde));
+                        row(ui, "闪避", &key_of(map, Action::Dodge));
+                        row(ui, "慢走", &key_of(map, Action::Walk));
                         row(ui, "快速存档 / 读档", &{
                             let s = key_of(map, Action::QuickSave);
                             let l = key_of(map, Action::QuickLoad);

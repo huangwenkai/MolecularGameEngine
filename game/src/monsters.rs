@@ -16,6 +16,14 @@ pub enum Kind {
     Zombie,
     /// 地狱犬：快速低血近战（A* 寻路追击）
     Hound,
+    /// 骷髅士兵：持械步行近战，中等血量与伤害（A* 寻路追击）
+    SkeletonSoldier,
+    /// 魔化蘑菇：缓慢高血，跳跃移动，接触伤害
+    DemonMushroom,
+    /// 哥布林：快速低血近战，残血会撤退
+    Goblin,
+    /// 独眼蝙蝠：飞行追击
+    EyeBat,
     /// BOSS：多阶段
     Boss,
 }
@@ -29,8 +37,29 @@ impl Kind {
             Kind::Archer => "骷髅弓手",
             Kind::Zombie => "僵尸",
             Kind::Hound => "地狱犬",
+            Kind::SkeletonSoldier => "骷髅士兵",
+            Kind::DemonMushroom => "魔化蘑菇",
+            Kind::Goblin => "哥布林",
+            Kind::EyeBat => "独眼蝙蝠",
             Kind::Boss => "BOSS",
         }
+    }
+
+    /// 绑定的动画名（素材导入后从 animations.ron 取帧；无素材时回退程序化方块）
+    pub fn anim_name(&self) -> Option<&'static str> {
+        Some(match self {
+            Kind::SkeletonSoldier => "mon_skeleton",
+            Kind::DemonMushroom => "mon_mushroom",
+            Kind::Goblin => "mon_goblin",
+            Kind::EyeBat => "mon_eyebat",
+            Kind::Slime => "mon_slime",
+            _ => return None,
+        })
+    }
+
+    /// 是否为飞行怪（无重力，直接扑向玩家）
+    pub fn flies(&self) -> bool {
+        matches!(self, Kind::Bat | Kind::EyeBat)
     }
 }
 
@@ -160,6 +189,10 @@ impl Monsters {
             Kind::Archer => (Vec2::new(4.5, 8.0), 30.0, 0.0, 42.0, 8),
             Kind::Zombie => (Vec2::new(4.5, 9.0), 72.0, 12.0, 30.0, 10),
             Kind::Hound => (Vec2::new(6.0, 5.0), 40.0, 9.0, 95.0, 9),
+            Kind::SkeletonSoldier => (Vec2::new(4.5, 9.0), 66.0, 14.0, 44.0, 12),
+            Kind::DemonMushroom => (Vec2::new(6.0, 6.0), 90.0, 12.0, 30.0, 11),
+            Kind::Goblin => (Vec2::new(4.0, 7.0), 45.0, 10.0, 105.0, 9),
+            Kind::EyeBat => (Vec2::new(4.0, 3.5), 26.0, 9.0, 88.0, 7),
             Kind::Boss => (Vec2::new(16.0, 14.0), 900.0, 18.0, 60.0, 150),
         };
         let (hp, dmg, speed) = match elite {
@@ -311,10 +344,10 @@ impl Monsters {
             m.anim += 1.0 / 60.0;
             let to_p = pcenter - (m.pos - Vec2::new(0.0, m.half.y));
             let dist = to_p.length();
-            let sight = if m.kind == Kind::Slime { 240.0 } else { 320.0 };
+            let sight = if m.kind == Kind::Slime || m.kind == Kind::DemonMushroom { 240.0 } else { 320.0 };
 
             // ---- 状态机 ----
-            m.state = if m.hp < m.max_hp * 0.18 && m.kind == Kind::Archer {
+            m.state = if m.hp < m.max_hp * 0.18 && (m.kind == Kind::Archer || m.kind == Kind::Goblin) {
                 AiState::Flee
             } else if dist < sight {
                 AiState::Chase
@@ -329,7 +362,7 @@ impl Monsters {
             // ---- A* 导航：地面怪追击/撤退时周期性重算路径 ----
             m.path_cd -= 1.0 / 60.0;
             if matches!(m.state, AiState::Chase | AiState::Flee)
-                && m.kind != Kind::Bat
+                && !m.kind.flies()
                 && !m.boss
                 && m.path_cd <= 0.0
             {
@@ -346,7 +379,7 @@ impl Monsters {
             }
 
             match m.kind {
-                Kind::Slime => {
+                Kind::Slime | Kind::DemonMushroom => {
                     // 地面跳跃移动（追击沿 A* 路径）
                     m.vel.y += 900.0 / 60.0;
                     let grounded = m.vel.y == 0.0 && world.solid_px(m.pos.x as i32, (m.pos.y + 1.0) as i32);
@@ -369,7 +402,7 @@ impl Monsters {
                         }
                     }
                 }
-                Kind::Bat => {
+                Kind::Bat | Kind::EyeBat => {
                     // 飞行：直接扑向玩家（巡逻时绕 home 晃）
                     let target = match m.state {
                         AiState::Chase => pcenter + Vec2::new(0.0, -14.0 + (m.anim * 3.0).sin() * 8.0),
@@ -408,8 +441,8 @@ impl Monsters {
                         });
                     }
                 }
-                Kind::Zombie | Kind::Hound => {
-                    // 步行追击（A* 导航），撞墙由通用跳障处理；僵尸慢速高血 / 地狱犬快速低血
+                Kind::Zombie | Kind::Hound | Kind::SkeletonSoldier | Kind::Goblin => {
+                    // 步行追击（A* 导航）；僵尸高血 / 地狱犬快速 / 骷髅士兵持械 / 哥布林敏捷
                     m.vel.y += 900.0 / 60.0;
                     let grounded =
                         world.solid_px(m.pos.x as i32, (m.pos.y + 1.0) as i32) && m.vel.y >= 0.0;
@@ -490,7 +523,7 @@ impl Monsters {
             }
 
             // ---- 物理（像素碰撞；蝙蝠无重力已单独处理）----
-            if m.kind != Kind::Bat {
+            if !m.kind.flies() {
                 // 撞墙跳：仅矮障碍（≤16px）自动跳过；高墙阻挡（防止沿峭壁反复跳爬）
                 let steps = 2;
                 for _ in 0..steps {
@@ -670,6 +703,10 @@ impl Monsters {
                 Kind::Archer => [0.85, 0.85, 0.9, 1.0],
                 Kind::Zombie => [0.35, 0.6, 0.3, 1.0],
                 Kind::Hound => [0.62, 0.32, 0.18, 1.0],
+                Kind::SkeletonSoldier => [0.88, 0.87, 0.78, 1.0],
+                Kind::DemonMushroom => [0.72, 0.28, 0.45, 1.0],
+                Kind::Goblin => [0.45, 0.72, 0.34, 1.0],
+                Kind::EyeBat => [0.42, 0.34, 0.52, 1.0],
                 Kind::Boss => [0.75, 0.2, 0.2, 1.0],
             };
             if let Some(e) = m.elite {
@@ -678,7 +715,7 @@ impl Monsters {
             if m.flash > 0.0 {
                 col = [3.0, 1.5, 1.5, 1.0];
             }
-            let bob = if m.kind == Kind::Bat {
+            let bob = if m.kind.flies() {
                 (m.anim * 6.0).sin() * 2.0
             } else {
                 0.0

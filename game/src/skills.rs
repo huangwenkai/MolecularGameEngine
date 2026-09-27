@@ -112,6 +112,7 @@ pub fn tick(app: &mut GameApp, ctx: &mut EngineCtx) {
     };
     if ok {
         app.skills.cds[i] = app.skills.cd_of(i);
+        app.player.casting = 0.35; // 施法姿态（手臂上举 + 聚能光效）
     }
 }
 

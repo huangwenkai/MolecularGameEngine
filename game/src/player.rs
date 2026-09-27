@@ -7,10 +7,16 @@ use mge_world::World;
 
 pub const GRAVITY: f32 = 900.0;
 pub const RUN: f32 = 130.0;
+/// 慢走速度倍率（按住 Ctrl）
+pub const WALK_MULT: f32 = 0.55;
 pub const ACCEL: f32 = 1200.0;
 pub const FRICTION: f32 = 1000.0;
 pub const JUMP_V: f32 = 300.0;
 pub const MAX_FALL: f32 = 420.0;
+/// 闪避冲刺
+pub const DODGE_SPEED: f32 = 300.0;
+pub const DODGE_TIME: f32 = 0.22;
+pub const DODGE_CD: f32 = 1.0;
 
 #[derive(Debug, Clone)]
 pub struct Player {
@@ -35,6 +41,16 @@ pub struct Player {
     pub dead: u32,
     /// 移速倍率（装备/词缀聚合，默认 1.0）
     pub move_mult: f32,
+    /// 闪避剩余时间（翻滚中，无敌）
+    pub dodge_t: f32,
+    /// 闪避方向（±1）
+    pub dodge_dir: f32,
+    /// 闪避冷却
+    pub dodge_cd: f32,
+    /// 无敌剩余时间
+    pub invuln: f32,
+    /// 施法姿态剩余时间（技能施放后短暂保持）
+    pub casting: f32,
 }
 
 impl Player {
@@ -60,6 +76,11 @@ impl Player {
             on_fire: 0,
             dead: 0,
             move_mult: 1.0,
+            dodge_t: 0.0,
+            dodge_dir: 1.0,
+            dodge_cd: 0.0,
+            invuln: 0.0,
+            casting: 0.0,
         }
     }
 
@@ -222,7 +243,32 @@ pub fn update(p: &mut Player, input: &InputState, world: &mut World, rng: &mut R
     if input.pressed(Action::Right) {
         intent += 1.0;
     }
+    // 慢走（按住 Ctrl）：用于走路动作与精细走位
+    if input.pressed(Action::Walk) {
+        intent *= WALK_MULT;
+    }
     let drop = input.pressed(Action::Down);
+
+    // ---- 计时器衰减 ----
+    p.invuln = (p.invuln - dt).max(0.0);
+    p.casting = (p.casting - dt).max(0.0);
+    p.dodge_cd = (p.dodge_cd - dt).max(0.0);
+
+    // ---- 闪避（Shift）：沿移动方向冲刺翻滚，期间无敌 ----
+    if p.dodge_t > 0.0 {
+        p.dodge_t -= dt;
+        p.vel.x = p.dodge_dir * DODGE_SPEED; // 冲刺期间锁定速度
+    } else if input.just_pressed(Action::Dodge) && p.dodge_cd <= 0.0 {
+        let dir = if intent != 0.0 { intent.signum() } else { p.facing };
+        p.dodge_dir = dir;
+        p.facing = dir;
+        p.dodge_t = DODGE_TIME;
+        p.invuln = DODGE_TIME + 0.06; // 翻滚全程 + 极短余量无敌
+        p.dodge_cd = DODGE_CD;
+        if !p.on_ground {
+            p.vel.y = p.vel.y.min(60.0); // 空中闪避：小幅下压，保留滞空感
+        }
+    }
 
     // ---- 攀爬 ----
     let can_climb = world.climbable_px(center.x as i32, center.y as i32)
@@ -253,8 +299,12 @@ pub fn update(p: &mut Player, input: &InputState, world: &mut World, rng: &mut R
     } else {
         // ---- 水平 ----
         let top_speed = if p.in_water { 70.0 } else { RUN * p.move_mult };
-        let target = intent * top_speed;
-        let rate = if intent != 0.0 { ACCEL } else { FRICTION };
+        let target = if p.dodge_t > 0.0 {
+            p.dodge_dir * DODGE_SPEED // 闪避覆盖走跑速度
+        } else {
+            intent * top_speed
+        };
+        let rate = if p.dodge_t > 0.0 { 4000.0 } else if intent != 0.0 { ACCEL } else { FRICTION };
         p.vel.x = mge_core::math::Aabb::approach(p.vel.x, target, rate * dt);
 
         // 前方粉末：低矮可直接踏上，高墙阻挡（踩沙踩雪不下沉）
@@ -561,14 +611,30 @@ fn push_part(
     }
 }
 
-/// 程序化动画渲染：分层部件 + 手臂持械跟随（部件外观可逐像素编辑）
-#[allow(clippy::too_many_arguments)]
+/// 渲染所需的视图信息（由 main 每帧从动作/技能/装备状态组装）
+pub struct PlayerView {
+    /// 手臂指向（鼠标瞄准）
+    pub arm_angle: f32,
+    /// 是否持剑（显示剑）
+    pub holding_sword: bool,
+    /// 攻击动作进行中（身体前倾）
+    pub attacking: bool,
+    /// 施法姿态剩余时间（>0 时手臂上举）
+    pub casting: f32,
+    /// 装备外观：头盔 / 胸甲 / 护腿的稀有度颜色（None = 未装备）
+    pub helmet: Option<[f32; 3]>,
+    pub chest: Option<[f32; 3]>,
+    pub legs: Option<[f32; 3]>,
+    /// 饰品（胸前徽章）
+    pub trinket: bool,
+}
+
+/// 程序化动画渲染：动作状态机（待机/走/跑/跳/落/闪避/攻击/施法）+ 装备外观
 pub fn render(
     p: &Player,
     batch: &mut mge_render::SpriteBatch,
     regions: &std::collections::HashMap<String, mge_render::Region>,
-    arm_angle: f32,
-    holding_sword: bool,
+    v: &PlayerView,
 ) {
     let white = regions.get("white").unwrap();
     let sword = regions.get("sword").unwrap();
@@ -585,34 +651,117 @@ pub fn render(
     let pants = tint([0.26, 0.26, 0.34]);
     let hair = tint([0.35, 0.24, 0.12]);
     let shoe = tint([0.20, 0.20, 0.22]);
-    // 自定义形象贴图的着色（正常显示原色；受伤闪红）
     let tex_tint: [f32; 4] = if flash { [2.5, 0.3, 0.3, 1.0] } else { [1.0; 4] };
 
     let f = p.facing;
     let base = p.pos; // 脚底中心
-    let walking = p.vel.x.abs() > 8.0 && p.on_ground;
-    let swing = if walking { (p.anim_t * std::f32::consts::TAU).sin() } else { 0.0 };
-    let bob = if walking { (p.anim_t * std::f32::consts::TAU * 2.0).sin().abs() * 0.8 } else { 0.0 };
-    let airborne = !p.on_ground && !p.climbing && !p.in_water;
-    let leg_lift = if airborne { 2.0 } else { 0.0 };
 
-    // 腿（两条，交错摆动）
-    let leg1 = base + Vec2::new(-1.8 + swing * 1.6 * f, -4.0 - leg_lift + bob * 0.3);
-    let leg2 = base + Vec2::new(1.8 - swing * 1.6 * f, -4.0 + leg_lift * 0.3 + bob * 0.3);
-    push_part(batch, regions, white, "char_leg", leg1, Vec2::new(4.0, 8.0), pants, tex_tint);
-    push_part(batch, regions, white, "char_leg", leg2, Vec2::new(4.0, 8.0), pants, tex_tint);
-    // 鞋
+    // ---- 动作状态判定 ----
+    let speed = p.vel.x.abs();
+    let airborne = !p.on_ground && !p.climbing && !p.in_water;
+    let rising = airborne && p.vel.y < -20.0; // 上升（起跳段）
+    let falling = airborne && p.vel.y > 40.0; // 下落段
+    let running = speed > 95.0 && p.on_ground; // 奔跑
+    let walking = speed > 8.0 && p.on_ground && !running; // 慢走
+    let dodging = p.dodge_t > 0.0;
+    let casting = v.casting > 0.0;
+
+    // 走/跑共用摆动相位（anim_t 已按速度比例推进，跑动天然更快）
+    let swing = if walking || running {
+        (p.anim_t * std::f32::consts::TAU).sin()
+    } else {
+        0.0
+    };
+    let swing_amp = if running { 2.2 } else { 1.4 }; // 跑步步幅更大
+    // 待机呼吸：缓慢起伏
+    let idle_bob = if p.on_ground && speed <= 8.0 && !dodging {
+        (p.anim_t * 1.6).sin().abs() * 0.7
+    } else {
+        0.0
+    };
+    let bob = if walking || running {
+        (p.anim_t * std::f32::consts::TAU * 2.0).sin().abs() * 0.8
+    } else {
+        idle_bob
+    };
+    // 身体前倾：奔跑/攻击时向移动或面向方向偏移
+    let lean = if dodging {
+        p.dodge_dir * 2.5
+    } else if running {
+        f * 1.2
+    } else if v.attacking {
+        f * 1.5
+    } else {
+        0.0
+    };
+    // 跳跃/下落腿部姿态：上升收腿、下落伸腿
+    let leg_lift = if rising {
+        3.5
+    } else if falling {
+        -1.0
+    } else if airborne {
+        2.0
+    } else {
+        0.0
+    };
+
+    // ---- 闪避翻滚：整体蜷缩旋转 + 残影（隐藏常规部件） ----
+    if dodging {
+        let prog = 1.0 - p.dodge_t / DODGE_TIME; // 0→1
+        let roll = prog * std::f32::consts::TAU * p.dodge_dir;
+        let center = base + Vec2::new(0.0, -6.0);
+        // 残影（两帧前的位置）
+        for k in 1..=2 {
+            let ghost = center - Vec2::new(p.dodge_dir * k as f32 * 4.0, 0.0);
+            batch.push(
+                ghost,
+                Vec2::new(9.0, 9.0),
+                roll - p.dodge_dir * k as f32 * 0.9,
+                regions.get("char_torso").unwrap_or(white),
+                [0.4, 0.6, 1.0, 0.25 / k as f32],
+            );
+        }
+        // 本体：旋转的蜷缩姿态
+        batch.push(
+            center,
+            Vec2::new(10.0, 10.0),
+            roll,
+            regions.get("char_torso").unwrap_or(white),
+            tex_tint,
+        );
+        return;
+    }
+
+    // ---- 腿 + 鞋（护腿装备时改为护甲色） ----
+    let leg_col = match v.legs {
+        Some(c) => tint(c),
+        None => pants,
+    };
+    let leg1 = base + Vec2::new(-1.8 + swing * swing_amp * f, -4.0 - leg_lift + bob * 0.3);
+    let leg2 = base + Vec2::new(1.8 - swing * swing_amp * f, -4.0 + leg_lift * 0.3 + bob * 0.3);
+    push_part(batch, regions, white, "char_leg", leg1, Vec2::new(4.0, 8.0), leg_col, tex_tint);
+    push_part(batch, regions, white, "char_leg", leg2, Vec2::new(4.0, 8.0), leg_col, tex_tint);
     push_part(batch, regions, white, "char_shoe", leg1 + Vec2::new(0.0, 3.5), Vec2::new(4.0, 2.0), shoe, tex_tint);
     push_part(batch, regions, white, "char_shoe", leg2 + Vec2::new(0.0, 3.5), Vec2::new(4.0, 2.0), shoe, tex_tint);
 
-    // 躯干
-    let torso = base + Vec2::new(0.0, -11.5 - bob * 0.5);
+    // ---- 躯干（胸甲覆盖 + 施法/攻击前倾） ----
+    let torso = base + Vec2::new(lean * 0.5, -11.5 - bob * 0.5);
     push_part(batch, regions, white, "char_torso", torso, Vec2::new(8.0, 9.0), shirt, tex_tint);
+    if let Some(c) = v.chest {
+        // 胸甲片 + 双肩垫
+        push_part(batch, regions, white, "char_torso", torso + Vec2::new(0.0, -0.5), Vec2::new(8.5, 5.5), tint(c), tex_tint);
+        batch.push_at(torso + Vec2::new(-3.6 * f, -5.0), Vec2::new(2.5, 2.5), white, tint(c));
+        batch.push_at(torso + Vec2::new(3.6 * f, -5.0), Vec2::new(2.5, 2.5), white, tint(c));
+    }
 
-    // 后臂（反向摆）
+    // ---- 后臂 ----
     let shoulder_b = torso + Vec2::new(-1.0 * f, -3.0);
     let back_ang = if p.climbing {
         -2.4
+    } else if casting {
+        std::f32::consts::PI - 0.9 * f // 施法：后臂后张
+    } else if rising {
+        std::f32::consts::PI - 0.6 * f // 跳跃：后臂上扬
     } else {
         std::f32::consts::PI + swing * 0.7 * f
     };
@@ -624,7 +773,7 @@ pub fn render(
         batch.push(hand_b, Vec2::new(3.0, 8.0), back_ang, white, shirt);
     }
 
-    // 头 + 头发（朝左时水平镜像，让五官朝向正确）
+    // ---- 头 + 头发 + 头盔 ----
     let head = torso + Vec2::new(0.5 * f, -6.0);
     push_part(batch, regions, white, "char_head", head, Vec2::new(8.0 * f, 8.0), skin, tex_tint);
     push_part(
@@ -637,19 +786,42 @@ pub fn render(
         hair,
         tex_tint,
     );
-
-    // 前臂（持械，指向 arm_angle）
-    let shoulder_f = torso + Vec2::new(1.2 * f, -3.0);
-    let hand_f = shoulder_f + Vec2::new(arm_angle.cos() * arm_len * 0.6, arm_angle.sin() * arm_len * 0.6);
-    if regions.contains_key("char_arm") {
-        batch.push(hand_f, Vec2::new(4.0, 8.0), arm_angle, regions.get("char_arm").unwrap(), tex_tint);
-    } else {
-        batch.push(hand_f, Vec2::new(3.0, 8.0), arm_angle, white, skin);
+    if let Some(c) = v.helmet {
+        // 头盔：顶盖 + 前檐
+        push_part(batch, regions, white, "char_hair", head + Vec2::new(0.0, -3.4), Vec2::new(9.0 * f, 3.5), tint(c), tex_tint);
+        batch.push_at(head + Vec2::new(2.5 * f, -2.0), Vec2::new(4.0, 1.2), white, tint(c));
     }
 
-    // 剑：挂在手上，沿手臂方向
-    if holding_sword {
-        let grip = hand_f + Vec2::new(arm_angle.cos() * 2.0, arm_angle.sin() * 2.0);
-        batch.push(grip, Vec2::new(22.0, 7.0), arm_angle, sword, [1.0; 4]);
+    // ---- 前臂（持械/施法姿态） ----
+    let shoulder_f = torso + Vec2::new(1.2 * f, -3.0);
+    let cast_ang = -std::f32::consts::FRAC_PI_3 * f; // 施法：前臂上举
+    let arm_ang = if casting { cast_ang } else { v.arm_angle };
+    let hand_f = shoulder_f + Vec2::new(arm_ang.cos() * arm_len * 0.6, arm_ang.sin() * arm_len * 0.6);
+    if regions.contains_key("char_arm") {
+        batch.push(hand_f, Vec2::new(4.0, 8.0), arm_ang, regions.get("char_arm").unwrap(), tex_tint);
+    } else {
+        batch.push(hand_f, Vec2::new(3.0, 8.0), arm_ang, white, skin);
+    }
+    // 施法光效：手掌聚能
+    if casting {
+        let glow = 1.5 + (p.casting * 30.0).sin().abs();
+        batch.push_at(hand_f, Vec2::splat(glow), white, [0.5, 0.8, 1.0, 0.9]);
+    }
+
+    // ---- 饰品徽章（胸口闪烁） ----
+    if v.trinket {
+        let tw = 0.7 + 0.3 * (p.anim_t * 4.0).sin();
+        batch.push_at(
+            torso + Vec2::new(-1.5 * f, -2.0),
+            Vec2::splat(1.5 * tw),
+            white,
+            [1.0, 0.9, 0.4, 1.0],
+        );
+    }
+
+    // ---- 剑 ----
+    if v.holding_sword {
+        let grip = hand_f + Vec2::new(arm_ang.cos() * 2.0, arm_ang.sin() * 2.0);
+        batch.push(grip, Vec2::new(22.0, 7.0), arm_ang, sword, [1.0; 4]);
     }
 }

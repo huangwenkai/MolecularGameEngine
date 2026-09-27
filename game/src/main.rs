@@ -801,7 +801,8 @@ impl App for GameApp {
                 &self.player.pos,
                 &self.player.half,
                 &mut self.player.hp,
-                st.mitigation(),
+                // 闪避翻滚期间无敌（完全减伤）
+                if self.player.invuln > 0.0 { 1.0 } else { st.mitigation() },
             ),
             &st,
             &mut self.vfx,
@@ -1025,18 +1026,31 @@ impl App for GameApp {
         // ---- 实体 ----
         entities::render(&self.ecs, batch, &self.regions);
 
-        // ---- 玩家 ----
+        // ---- 玩家（动作姿态 + 装备外观）----
         let shoulder = self.player.pos + Vec2::new(0.0, -14.5);
         let d = self.mouse_world - shoulder;
         let aim = d.y.atan2(d.x);
         let arm_angle = self.action.arm_angle(aim);
-        player::render(
-            &self.player,
-            batch,
-            &self.regions,
+        // 装备外观：头盔/胸甲/护腿取稀有度颜色，饰品显示徽章
+        let equip_rgb = |i: usize| -> Option<[f32; 3]> {
+            self.inv.equip[i]
+                .as_ref()
+                .map(|it| {
+                    let c = self.db.rarity(it).color();
+                    [c[0], c[1], c[2]]
+                })
+        };
+        let view = player::PlayerView {
             arm_angle,
-            self.tool.tool == Tool::Sword,
-        );
+            holding_sword: self.tool.tool == Tool::Sword,
+            attacking: self.action.current.is_some(),
+            casting: self.player.casting,
+            helmet: equip_rgb(items::Slot::Head.equip_index()),
+            chest: equip_rgb(items::Slot::Chest.equip_index()),
+            legs: equip_rgb(items::Slot::Legs.equip_index()),
+            trinket: self.inv.equip[items::Slot::Trinket.equip_index()].is_some(),
+        };
+        player::render(&self.player, batch, &self.regions, &view);
 
         // ---- 投射物与 VFX（最上层）----
         let white = self.regions.get("white").unwrap();
