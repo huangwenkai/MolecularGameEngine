@@ -542,17 +542,25 @@ fn slot_stat_text(db: &ItemDb, it: &Item) -> String {
     parts.join(" ")
 }
 
-/// 悬停物品 Tooltip（装备类显示与当前装备的对比）
+/// 悬停物品 Tooltip：名称/稀有度 + 类型介绍 + 属性（装备类显示与当前装备的对比）+ 操作提示
 fn item_tooltip(resp: egui::Response, app: &GameApp, item: Option<&Item>, bag_idx: Option<usize>) {
     let Some(it) = item else { return };
     let d = app.db.def(&it.def);
     let r = app.db.rarity(it);
     resp.on_hover_ui(|ui| {
+        ui.set_max_width(240.0);
         ui.colored_label(rarity_color32(&app.db, it), format!("{}（{}）", d.name, r.name()));
-        ui.weak(format!("{} · 等级{} · 价值{}", slot_label(d.slot), d.lvl, d.value));
+        ui.weak(format!(
+            "{} · 等级{} · 价值{} · 可堆叠×{}",
+            d.category(),
+            d.lvl,
+            d.value,
+            d.stack
+        ));
         ui.separator();
-        if d.dmg > 0.0 {
-            // 装备对比：显示与当前佩戴的差值
+        // ---- 属性 ----
+        if d.stack == 1 && d.dmg > 0.0 {
+            // 武器对比：显示与当前佩戴的差值
             let ei = d.slot.equip_index();
             let cur = app.inv.equip[ei]
                 .as_ref()
@@ -569,17 +577,45 @@ fn item_tooltip(resp: egui::Response, app: &GameApp, item: Option<&Item>, bag_id
             };
             ui.colored_label(col, txt);
         }
-        for a in &it.affixes {
-            ui.colored_label(Color32::from_rgb(90, 170, 255), app.db.affix_text(a));
-        }
         if d.armor > 0.0 {
             ui.label(format!("护甲 {:.0}", d.armor));
         }
-        if d.hp > 0.0 && d.stack > 1 {
-            ui.label(format!("使用：恢复 {:.0} 生命 [Q]", d.hp));
+        if d.speed != 1.0 {
+            ui.label(format!("攻速 ×{:.2}", d.speed));
         }
-        if let Some(idx) = bag_idx {
-            ui.weak(format!("[右键丢弃 格{}] 拖拽整理", idx));
+        if d.crit > 0.0 {
+            ui.label(format!("暴击率 +{:.1}%", d.crit));
+        }
+        if d.crit_dmg > 0.0 {
+            ui.label(format!("暴击伤害 +{:.0}%", d.crit_dmg));
+        }
+        for a in &it.affixes {
+            ui.colored_label(Color32::from_rgb(90, 170, 255), app.db.affix_text(a));
+        }
+        // ---- 介绍（按类型）----
+        ui.separator();
+        if d.stack == 1 {
+            ui.weak(format!(
+                "介绍：{}，装备后提升角色属性。左键/右键装备到「{}」位。",
+                slot_label(d.slot),
+                slot_label(d.slot)
+            ));
+        } else if d.hp > 0.0 {
+            ui.weak(format!(
+                "介绍：药物，使用后恢复 {:.0} 生命。左键/右键使用，快捷键 Q。",
+                d.hp
+            ));
+        } else {
+            ui.weak("介绍：合成材料，在背包下方合成区用于制作物品。");
+        }
+        // ---- 操作提示 ----
+        if bag_idx.is_some() {
+            ui.weak(format!(
+                "操作：左键/右键{} · 拖拽整理 · 拖出窗口丢弃",
+                if d.stack == 1 { "装备" } else if d.hp > 0.0 { "使用" } else { "放置" }
+            ));
+        } else {
+            ui.weak("操作：左键/右键卸下 · 拖到背包卸下 · 拖出窗口丢弃");
         }
     });
 }
