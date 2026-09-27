@@ -110,11 +110,11 @@ fn section(
     open: &mut bool,
     body: impl FnOnce(&mut egui::Ui),
 ) {
+    // 直角、无外边距缝隙：模块之间连成一片（仅保留内部内边距）
     egui::Frame::NONE
         .fill(BG_SECTION)
         .stroke(Stroke::new(LINE_W, LINE))
-        .corner_radius(6.0)
-        .inner_margin(Margin::same(6))
+        .inner_margin(Margin::symmetric(6, 5))
         .show(ui, |ui| {
             // 区块内控件统一包一层 ID 作用域，避免 ScrollArea/按钮等 ID 冲突
             ui.push_id(title, |ui| {
@@ -135,11 +135,12 @@ fn section(
                 });
                 if *open {
                     ui.separator();
+                    // 模块内部保留正常行距（模块之间由外层置 0）
+                    ui.spacing_mut().item_spacing.y = 4.0;
                     body(ui);
                 }
             });
         });
-    ui.add_space(4.0);
 }
 
 /// 属性行：左键名（弱化）右键值（等宽）
@@ -181,18 +182,20 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
             egui::Frame::NONE
                 .fill(BG_PANEL)
                 .stroke(Stroke::new(LINE_W, LINE))
-                .inner_margin(Margin::same(6)),
+                .inner_margin(Margin::ZERO),
         )
         .show(ctx, |ui| {
-            // 标题栏
+            // 模块之间零间距（标题栏与区块紧贴）
+            ui.spacing_mut().item_spacing.y = 0.0;
+            // 标题栏（直角满宽）
             egui::Frame::NONE
                 .fill(BG_BAR)
-                .corner_radius(5.0)
-                .inner_margin(Margin::same(6))
+                .stroke(Stroke::new(LINE_W, LINE))
+                .inner_margin(Margin::symmetric(6, 5))
                 .show(ui, |ui| {
+                    ui.set_min_width(ui.available_width());
                     ui.label(RichText::new(&title).strong().color(ACCENT));
                 });
-            ui.add_space(6.0);
 
             egui::ScrollArea::vertical()
                 .id_salt("ide_left_scroll")
@@ -335,17 +338,18 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
             egui::Frame::NONE
                 .fill(BG_PANEL)
                 .stroke(Stroke::new(LINE_W, LINE))
-                .inner_margin(Margin::same(6)),
+                .inner_margin(Margin::ZERO),
         )
         .show(ctx, |ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
             egui::Frame::NONE
                 .fill(BG_BAR)
-                .corner_radius(5.0)
-                .inner_margin(Margin::same(6))
+                .stroke(Stroke::new(LINE_W, LINE))
+                .inner_margin(Margin::symmetric(6, 5))
                 .show(ui, |ui| {
+                    ui.set_min_width(ui.available_width());
                     ui.label(RichText::new("检查器 Inspector").strong().color(ACCENT));
                 });
-            ui.add_space(6.0);
             egui::ScrollArea::vertical()
                 .id_salt("ide_right_scroll")
                 .show(ui, |ui| {
