@@ -377,14 +377,23 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
 
     // ---------------- 中栏：视口 / 文件 ----------------
     egui::CentralPanel::default()
-        .frame(egui::Frame::NONE.fill(Color32::TRANSPARENT))
+        .frame(if app.ide.tab == 1 {
+            // 文件模式：整块不透明（避免透出游戏画面）
+            egui::Frame::NONE.fill(BG_PANEL)
+        } else {
+            // 视口模式：透明，直接透出实时游戏画面
+            egui::Frame::NONE.fill(Color32::TRANSPARENT)
+        })
         .show(ctx, |ui| {
-            // 顶部工具条
+            // 工具条与内容区零间距堆叠（消除缝隙）
+            ui.spacing_mut().item_spacing.y = 0.0;
+            // 顶部工具条：直角、满宽、底部分隔线（圆角会在四角透出游戏画面）
             egui::Frame::NONE
                 .fill(BG_BAR)
-                .corner_radius(5.0)
-                .inner_margin(Margin::same(5))
+                .stroke(Stroke::new(LINE_W, LINE))
+                .inner_margin(Margin::symmetric(6, 5))
                 .show(ui, |ui| {
+                    ui.set_min_width(ui.available_width());
                     ui.horizontal(|ui| {
                         let t0 = if app.ide.tab == 0 { ACCENT } else { DIM };
                         let t1 = if app.ide.tab == 1 { ACCENT } else { DIM };
@@ -426,23 +435,24 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
                 });
 
             if app.ide.tab == 1 {
+                // 文件区紧接工具条（无间距、直角、不透明）
                 egui::Frame::NONE
                     .fill(BG_PANEL)
-                    .stroke(Stroke::new(LINE_W, LINE))
-                    .corner_radius(5.0)
                     .inner_margin(Margin::same(6))
                     .show(ui, |ui| {
+                        ui.set_min_width(ui.available_width());
                         draw_file_view(ui, app);
                     });
             }
 
-            // 底部状态栏
+            // 底部状态栏（直角满宽，无圆角透视）
             ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
                 egui::Frame::NONE
                     .fill(BG_BAR)
-                    .corner_radius(5.0)
-                    .inner_margin(Margin::same(5))
+                    .stroke(Stroke::new(LINE_W, LINE))
+                    .inner_margin(Margin::symmetric(6, 5))
                     .show(ui, |ui| {
+                        ui.set_min_width(ui.available_width());
                         ui.horizontal(|ui| {
                             ui.weak(if app.ide.tab == 0 {
                                 "视口显示实时游戏画面（可暂停/运行，拖昼夜滑块看光照）"
