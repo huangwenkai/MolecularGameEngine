@@ -244,7 +244,7 @@ impl Monsters {
         &mut self,
         world: &World,
         player_pos: Vec2,
-        player_level: u32,
+        _player_level: u32,
         rng: &mut Rng,
     ) {
         let t = world.time;
@@ -277,27 +277,27 @@ impl Monsters {
         } else {
             None
         };
+        // 夜间刷怪池：仅四种已导入精灵素材的怪物（骷髅士兵/哥布林/魔化蘑菇/独眼蝙蝠）
+        // 程序化色块怪（史莱姆/蝙蝠/僵尸/地狱犬/弓手）与 BOSS 不再自然刷新，
+        // 仍可通过 test_spawn / 后续素材导入恢复。
         match rng.range_i32(0, 4) {
-            0 => self.spawn_one(Kind::Slime, Vec2::new(px as f32 + 0.5, surface as f32), rng, elite),
-            1 => {
-                let fly = surface as f32 - rng.range_f32(40.0, 110.0);
-                self.spawn_one(Kind::Bat, Vec2::new(px as f32 + 0.5, fly), rng, elite);
-            }
-            2 => self.spawn_one(Kind::Zombie, Vec2::new(px as f32 + 0.5, surface as f32), rng, elite),
-            3 => self.spawn_one(Kind::Hound, Vec2::new(px as f32 + 0.5, surface as f32), rng, elite),
-            _ => self.spawn_one(Kind::Archer, Vec2::new(px as f32 + 0.5, surface as f32), rng, elite),
-        }
-        // 深夜 BOSS：一次性
-        if night && !self.boss_spawned_night && !self.boss_alive && player_level >= 2 && t > 0.78 {
-            let px = player_pos.x as i32 + dx * rng.range_i32(320, 460);
-            let surface = surface_y(world, px);
-            self.spawn_one(
-                Kind::Boss,
-                Vec2::new(px as f32 + 0.5, surface as f32 - 10.0),
+            0 => self.spawn_one(
+                Kind::SkeletonSoldier,
+                Vec2::new(px as f32 + 0.5, surface as f32),
                 rng,
-                None,
-            );
-            self.boss_spawned_night = true;
+                elite,
+            ),
+            1 => self.spawn_one(Kind::Goblin, Vec2::new(px as f32 + 0.5, surface as f32), rng, elite),
+            2 => self.spawn_one(
+                Kind::DemonMushroom,
+                Vec2::new(px as f32 + 0.5, surface as f32),
+                rng,
+                elite,
+            ),
+            _ => {
+                let fly = surface as f32 - rng.range_f32(40.0, 110.0);
+                self.spawn_one(Kind::EyeBat, Vec2::new(px as f32 + 0.5, fly), rng, elite);
+            }
         }
     }
 
