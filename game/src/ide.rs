@@ -175,7 +175,7 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
             egui::ScrollArea::vertical().show(ui, |ui| {
                 let p = EntSel::Player;
                 if ui
-                    .selectable_label(app.ide.ent == Some(p), "玩家 Player")
+                    .selectable_label(app.ide.ent == Some(p), "玩家")
                     .clicked()
                 {
                     app.ide.ent = Some(p);
@@ -184,7 +184,7 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
                 ui.small(format!("怪物 ({})", app.monsters.list.len()));
                 for i in 0..app.monsters.list.len() {
                     let m = &app.monsters.list[i];
-                    let label = format!("{:?}  hp {:.0}", m.kind, m.hp);
+                    let label = format!("{}  生命 {:.0}", m.kind.name(), m.hp);
                     if ui
                         .selectable_label(app.ide.ent == Some(EntSel::Monster(i)), label)
                         .clicked()
@@ -196,7 +196,7 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
                 ui.small(format!("NPC ({})", app.npcs.list.len()));
                 for i in 0..app.npcs.list.len() {
                     let n = &app.npcs.list[i];
-                    let label = format!("NPC {}  {:?}", i, n.state);
+                    let label = format!("居民 {}  {}", i, n.state.name());
                     if ui
                         .selectable_label(app.ide.ent == Some(EntSel::Npc(i)), label)
                         .clicked()
@@ -299,7 +299,7 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
 fn draw_entity_inspector(ui: &mut egui::Ui, app: &mut GameApp, ent: EntSel) {
     match ent {
         EntSel::Player => {
-            ui.label(RichText::new("玩家 Player").strong());
+            ui.label(RichText::new("玩家").strong());
             let p = &app.player;
             ui.monospace(format!("位置 ({:.1}, {:.1})", p.pos.x, p.pos.y));
             ui.monospace(format!("速度 ({:.1}, {:.1})", p.vel.x, p.vel.y));
@@ -307,8 +307,8 @@ fn draw_entity_inspector(ui: &mut egui::Ui, app: &mut GameApp, ent: EntSel) {
             ui.monospace(format!("朝向 {:.0}  落地 {}", p.facing, p.on_ground));
             ui.monospace(format!("等级 {}  经验 {}", app.inv.level, app.inv.xp));
             ui.monospace(format!(
-                "工具 {:?}  技能点 {}",
-                app.tool.tool, app.skills.pts
+                "工具 {}  技能点 {}",
+                app.tool.tool.name(), app.skills.pts
             ));
         }
         EntSel::Monster(i) => {
@@ -316,10 +316,10 @@ fn draw_entity_inspector(ui: &mut egui::Ui, app: &mut GameApp, ent: EntSel) {
                 app.ide.ent = None;
                 return;
             };
-            ui.label(RichText::new(format!("怪物 {:?}", m.kind)).strong());
+            ui.label(RichText::new(format!("怪物 {}", m.kind.name())).strong());
             ui.monospace(format!("位置 ({:.1}, {:.1})", m.pos.x, m.pos.y));
             ui.monospace(format!("生命 {:.0} / {:.0}", m.hp, m.max_hp));
-            ui.monospace(format!("状态 {:?}", m.state));
+            ui.monospace(format!("状态 {}", m.state.name()));
             ui.monospace(format!("速度 {:.0}  伤害 {:.0}", m.speed, m.dmg));
             ui.monospace(format!("阶段 {}  路径点 {}", m.phase, m.path.len()));
         }
@@ -330,20 +330,20 @@ fn draw_entity_inspector(ui: &mut egui::Ui, app: &mut GameApp, ent: EntSel) {
             };
             ui.label(RichText::new(format!("NPC #{}", i)).strong());
             ui.monospace(format!("位置 ({:.1}, {:.1})", n.pos.x, n.pos.y));
-            ui.monospace(format!("状态 {:?}", n.state));
+            ui.monospace(format!("状态 {}", n.state.name()));
             ui.monospace(format!("饥饿 {:.0}  口渴 {:.0}", n.hunger, n.thirst));
             ui.monospace(format!("疲劳 {:.0}", n.fatigue));
             ui.monospace(format!("家 ({:.0}, {:.0})", n.home.x, n.home.y));
         }
         EntSel::Dummy(e) => {
-            ui.label(RichText::new("训练假人 Dummy").strong());
+            ui.label(RichText::new("训练假人").strong());
             if let Ok(tr) = app.ecs.get::<&crate::entities::Transform>(e) {
                 let pos = tr.pos;
                 drop(tr);
                 ui.monospace(format!("位置 ({:.1}, {:.1})", pos.x, pos.y));
             }
             if let Ok(d) = app.ecs.get::<&crate::entities::Dummy>(e) {
-                ui.monospace(format!("生命 {:.0}  重生 {:?}", d.hp, d.respawn));
+                ui.monospace(format!("生命 {:.0}  重生倒计时 {}", d.hp, d.respawn));
             }
         }
     }

@@ -125,7 +125,7 @@ impl Projectiles {
     /// 火球命中后由调用方在世界里引爆（避免借用冲突）；st 为玩家聚合属性
     pub fn check_dummies(
         &mut self,
-        targets: &[(hecs::Entity, Vec2, Vec2)], // (entity, pos, half)
+        targets: &[(hecs::Entity, Vec2, Vec2)], // (实体, 位置, 半尺寸)
         vfx: &mut Vfx,
         rng: &mut Rng,
         st: &crate::items::Stats,

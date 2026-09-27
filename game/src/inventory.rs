@@ -5,7 +5,7 @@ use egui::{Color32, DragAndDrop};
 use mge_core::rng::Rng;
 
 pub const BAG_SIZE: usize = 30;
-pub const EQUIP_SLOTS: usize = 5; // Weapon Head Chest Legs Trinket
+pub const EQUIP_SLOTS: usize = 5; // 武器 / 头 / 胸 / 腿 / 饰品
 
 /// 属性点分配
 #[derive(Debug, Clone, Copy, Default, serde::Serialize, serde::Deserialize)]

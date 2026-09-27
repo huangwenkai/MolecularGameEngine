@@ -36,7 +36,7 @@ impl Rng {
         (self.next_u64() >> 32) as u32
     }
 
-    /// [0, 1)
+    /// 返回 [0, 1) 区间的随机浮点数
     pub fn f32(&mut self) -> f32 {
         (self.next_u64() >> 40) as f32 / (1u64 << 24) as f32
     }
@@ -49,7 +49,7 @@ impl Rng {
         lo + (self.next_u64() % (hi - lo + 1) as u64) as i32
     }
 
-    /// [lo, hi)
+    /// 返回 [lo, hi) 区间的随机整数
     pub fn range_f32(&mut self, lo: f32, hi: f32) -> f32 {
         lo + self.f32() * (hi - lo)
     }

@@ -23,6 +23,21 @@ pub enum NpcState {
     Work,
 }
 
+impl NpcState {
+    /// 中文名（IDE/UI 展示）
+    pub fn name(&self) -> &'static str {
+        match self {
+            NpcState::Idle => "闲逛",
+            NpcState::SeekWater => "找水",
+            NpcState::Drink(_) => "喝水",
+            NpcState::SeekFood => "找食物",
+            NpcState::Eat(_) => "进食",
+            NpcState::Sleep => "睡觉",
+            NpcState::Work => "工作",
+        }
+    }
+}
+
 pub struct Npc {
     pub pos: Vec2,
     pub vel: Vec2,

@@ -20,11 +20,39 @@ pub enum Kind {
     Boss,
 }
 
+impl Kind {
+    /// 中文名（IDE/UI 展示）
+    pub fn name(&self) -> &'static str {
+        match self {
+            Kind::Slime => "史莱姆",
+            Kind::Bat => "蝙蝠",
+            Kind::Archer => "骷髅弓手",
+            Kind::Zombie => "僵尸",
+            Kind::Hound => "地狱犬",
+            Kind::Boss => "BOSS",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AiState {
+    /// 巡逻
     Patrol,
+    /// 追击
     Chase,
+    /// 撤退
     Flee,
+}
+
+impl AiState {
+    /// 中文名（IDE/UI 展示）
+    pub fn name(&self) -> &'static str {
+        match self {
+            AiState::Patrol => "巡逻",
+            AiState::Chase => "追击",
+            AiState::Flee => "撤退",
+        }
+    }
 }
 
 /// 精英词缀
@@ -243,7 +271,7 @@ impl Monsters {
     pub fn update(
         &mut self,
         world: &mut World,
-        player: (&Vec2, &Vec2, &mut f32, f32), // (pos, half, hp, mitigation)
+        player: (&Vec2, &Vec2, &mut f32, f32), // (位置, 半尺寸, 生命, 减伤率)
         st: &Stats,
         vfx: &mut crate::vfx::Vfx,
         rng: &mut Rng,

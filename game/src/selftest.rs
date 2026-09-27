@@ -158,7 +158,7 @@ pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
         }
         930 => {
             println!(
-                "[SELFTEST] vfx particles {} texts {} | projectiles {}",
+                "[SELFTEST] 特效粒子 {} 飘字 {} | 投射物 {}",
                 game.vfx.particles.len(),
                 game.vfx.texts.len(),
                 game.projectiles.list.len(),
@@ -208,7 +208,7 @@ pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
                 && game.weapons.slash == "editor_test_fx"
                 && game.vfx.particles.len() > 0;
             println!(
-                "[SELFTEST] editor link {} | bps {} | slash={} | particles {}",
+                "[SELFTEST] 编辑器链路 {} | 蓝图数 {} | slash={} | 粒子 {}",
                 if ok { "PASS" } else { "FAIL" },
                 game.vfx.bps.len(),
                 game.weapons.slash,
@@ -235,7 +235,7 @@ pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
         }
         968 => {
             println!(
-                "[SELFTEST] drops {} | bag {} | xp {}",
+                "[SELFTEST] 掉落物 {} | 背包 {} | 经验 {}",
                 game.drops.list.len(),
                 game.inv.bag.iter().flatten().count(),
                 game.inv.xp,
@@ -254,7 +254,7 @@ pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
             // 拾取后：bag 应非空、drops 应清空（金币入 gold 或物品入包）
             let bag_n = game.inv.bag.iter().flatten().count();
             println!(
-                "[SELFTEST] picked | bag {} gold {} drops left {}",
+                "[SELFTEST] 已拾取 | 背包 {} 金币 {} 掉落物 left {}",
                 bag_n,
                 game.inv.gold,
                 game.drops.list.len(),
@@ -293,7 +293,7 @@ pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
                 let after = game.inv.aggregate(&game.db);
                 let after_sum = after.dmg_flat + after.armor + after.hp;
                 println!(
-                    "[SELFTEST] equip {} | stats {:.1} -> {:.1}",
+                    "[SELFTEST] 装备结果 {} | 属性 {:.1} -> {:.1}",
                     if ok { "OK" } else { "FAIL" },
                     before_sum,
                     after_sum,
@@ -306,7 +306,7 @@ pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
             let st = game.inv.aggregate(&game.db);
             let pass = equipped && game.inv.xp >= 10;
             println!(
-                "[SELFTEST] dark loop {} | xp {} bag {} equipped {} | atk {:.1} (base 15)",
+                "[SELFTEST] 暗黑循环 {} | 经验 {} 背包 {} 已装备 {} | 攻击 {:.1} (base 15)",
                 if pass { "PASS" } else { "FAIL" },
                 game.inv.xp,
                 bag_n,
@@ -342,7 +342,7 @@ pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
                 .find(|m| m.boss)
                 .map(|b| (b.pos.x as i32, b.phase));
             println!(
-                "[SELFTEST] monsters {} | boss alive {} at {:?}",
+                "[SELFTEST] 怪物 {} | BOSS存活 {} at {:?}",
                 game.monsters.list.len(),
                 game.monsters.boss_alive,
                 boss,
@@ -370,7 +370,7 @@ pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
                 .iter()
                 .any(|m| m.hp < m.max_hp);
             println!(
-                "[SELFTEST] ai chasing {}/{} | monster hurt {}",
+                "[SELFTEST] AI追击 {}/{} | 怪物受伤 {}",
                 chasing,
                 game.monsters.list.len(),
                 hurt,
@@ -391,7 +391,7 @@ pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
                 .map(|b| b.phase)
                 .unwrap_or(255);
             let bullets = game.monsters.bullets.len();
-            println!("[SELFTEST] boss phase {} | bullets {}", phase, bullets);
+            println!("[SELFTEST] BOSS阶段 {} | 弹丸 {}", phase, bullets);
         }
         1036 => {
             let boss_dead = !game.monsters.list.iter().any(|m| m.boss);
@@ -403,7 +403,7 @@ pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
                 .count();
             let pass = game.monsters.list.len() > 0 && chasing > 0;
             println!(
-                "[SELFTEST] m9 ai {} | alive {} chasing {} boss_dead {}",
+                "[SELFTEST] M9怪物AI {} | 存活 {} 追击 {} BOSS阵亡 {}",
                 if pass { "PASS" } else { "FAIL" },
                 game.monsters.list.len(),
                 chasing,
@@ -455,7 +455,7 @@ pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
                 }
             }
             println!(
-                "[SELFTEST] save/load {} | mined_restored_to_empty {} | lvl {}",
+                "[SELFTEST] 存读档 {} | 挖空已还原 {} | 等级 {}",
                 if mined_kept { "PASS" } else { "FAIL" },
                 mined_kept,
                 game.inv.level,
@@ -500,7 +500,7 @@ pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
                 game.npcs.list[1].fatigue = 0.0;
             }
             println!(
-                "[SELFTEST] npcs {} | seeded food+water | hunger0 {:.0} thirst1 {:.0}",
+                "[SELFTEST] 居民 {} | seeded food+water | hunger0 {:.0} thirst1 {:.0}",
                 game.npcs.list.len(),
                 game.npcs.list.first().map(|n| n.hunger).unwrap_or(0.0),
                 game.npcs.list.get(1).map(|n| n.thirst).unwrap_or(0.0),
@@ -528,7 +528,7 @@ pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
                 .map(|n| matches!(n.state, crate::npc::NpcState::Drink(_)))
                 .unwrap_or(false);
             println!(
-                "[SELFTEST] npc act eat {} drink {}",
+                "[SELFTEST] 居民进食 {} 饮水 {}",
                 if eat { "OK" } else { "FAIL" },
                 if drink { "OK" } else { "FAIL" },
             );
@@ -539,7 +539,7 @@ pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
             let eat_ok = game.npcs.list.get(0).map(|n| n.hunger < 1.0).unwrap_or(false);
             let drink_ok = game.npcs.list.get(1).map(|n| n.thirst < 1.0).unwrap_or(false);
             println!(
-                "[SELFTEST] npc consume {} | hunger0 {:.2} thirst1 {:.2}",
+                "[SELFTEST] 居民消耗 {} | hunger0 {:.2} thirst1 {:.2}",
                 if eat_ok && drink_ok { "PASS" } else { "FAIL" },
                 game.npcs.list.first().map(|n| n.hunger).unwrap_or(999.0),
                 game.npcs.list.get(1).map(|n| n.thirst).unwrap_or(999.0),
@@ -561,7 +561,7 @@ pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
                 .unwrap_or((crate::npc::NpcState::Idle, 999.0));
             let ok = st == crate::npc::NpcState::Sleep && f < 64.0;
             println!(
-                "[SELFTEST] npc sleep {} | state {:?} fatigue {:.2}",
+                "[SELFTEST] 居民睡觉 {} | 状态 {:?} 疲劳 {:.2}",
                 if ok { "PASS" } else { "FAIL" },
                 st,
                 f,
@@ -578,7 +578,7 @@ pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
                 .unwrap_or(false);
             let pass = eat_ok && drink_ok && sleep_ok;
             println!(
-                "[SELFTEST] m14 npc {} | eat {} drink {} sleep {}",
+                "[SELFTEST] M14居民 {} | 进食 {} 饮水 {} 睡眠 {}",
                 if pass { "PASS" } else { "FAIL" },
                 eat_ok,
                 drink_ok,
@@ -612,7 +612,7 @@ pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
             game.anim_preview = Some(AnimPlayer::new("test_anim"));
             game.anim_last_event = None;
             println!(
-                "[SELFTEST] anim register {}",
+                "[SELFTEST] 动画注册 {}",
                 if ok { "OK" } else { "FAIL" },
             );
         }
@@ -626,7 +626,7 @@ pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
             let ev = game.anim_last_event.clone().unwrap_or_default();
             let pass = n == 3 && frame < 3 && ev == "boom";
             println!(
-                "[SELFTEST] anim play {} | frames {n} cur {frame} event '{ev}'",
+                "[SELFTEST] 动画播放 {} | 帧数 {n} 当前帧 {frame} 事件 '{ev}'",
                 if pass { "PASS" } else { "FAIL" },
             );
             ctx.request_screenshot("screenshots/13_anim.png");
@@ -646,7 +646,7 @@ pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
             game.world.place_torch(sx + 20, sy + 13);
             game.player.pos = Vec2::new(sx as f32 + 0.5, sy as f32 + 13.0);
             game.player.vel = Vec2::ZERO;
-            println!("[SELFTEST] wall showroom carved at ({sx},{sy})");
+            println!("[SELFTEST] 背景墙展示厅 开凿于 ({sx},{sy})");
         }
         1210 => {
             game.world.time = 0.30;
@@ -689,7 +689,7 @@ pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
             cols.dedup();
             let (minx, maxx) = (cols.first().copied().unwrap_or(0), cols.last().copied().unwrap_or(0));
             println!(
-                "[SELFTEST] tree px wood {wn} leaf {ln} | trunk cols {} span {minx}..{maxx} | veg grass {gn} flowers {fn_}",
+                "[SELFTEST] 树木像素 木材 {wn} 树叶 {ln} | 树干列 {} 跨度 {minx}..{maxx} | veg grass {gn} flowers {fn_}",
                 cols.len()
             );
         }
@@ -710,7 +710,7 @@ pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
             let packed = game.skin.get("char_head").map(|p| p.ax > 0).unwrap_or(false);
             let ok = eye_ok && edit_ok && packed;
             println!(
-                "[SELFTEST] char skin {} | eyes {eye_ok} edit {edit_ok} atlas {packed}",
+                "[SELFTEST] 人物形象 {} | 眼睛 {eye_ok} 编辑 {edit_ok} 图集 {packed}",
                 if ok { "PASS" } else { "FAIL" }
             );
             // 植被重新生长回归检查：密度清零 → 植被应被全部清除
@@ -729,7 +729,7 @@ pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
                 }
             }
             println!(
-                "[SELFTEST] veg regrow {} | grass px {n}",
+                "[SELFTEST] 植被重铺 {} | 草像素 {n}",
                 if n == 0 { "PASS" } else { "FAIL" }
             );
         }
@@ -740,7 +740,7 @@ pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
         970 => {
             let total = (game.world.pixels.w / 128) * (game.world.pixels.h / 128);
             println!(
-                "[SELFTEST] tick={} | avg {:.2}ms/tick | sim {:.2} light {:.2} | active_px {} | asleep {}/{} chunks",
+                "[SELFTEST] tick={} | 平均 {:.2}ms/tick | 模拟 {:.2} 光照 {:.2} | 活跃像素 {} | 休眠 {}/{} 区块",
                 tick,
                 game.tick_ms_sum / game.tick_count.max(1) as f32,
                 game.world.perf_sim_ms / game.tick_count.max(1) as f32,
@@ -750,7 +750,7 @@ pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
                 total,
             );
             println!(
-                "[SELFTEST] player hp {:.0} pos ({:.0},{:.0}) | dummies {}",
+                "[SELFTEST] 玩家生命 {:.0} 位置 ({:.0},{:.0}) | 假人 {}",
                 game.player.hp,
                 game.player.pos.x,
                 game.player.pos.y,
@@ -777,7 +777,7 @@ pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
             let cd_on = game.skills.cd_remaining(2) > 0.0;
             input.inject(Action::Skill1, PRESS); // 旋风斩
             println!(
-                "[SELFTEST] skill heal {} | hp {:.0} cd {:.1}",
+                "[SELFTEST] 技能治疗 {} | 生命 {:.0} 冷却 {:.1}",
                 if healed && cd_on { "PASS" } else { "FAIL" },
                 game.player.hp,
                 game.skills.cd_remaining(2),
@@ -789,7 +789,7 @@ pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
         1260 => {
             let cd_on = game.skills.cd_remaining(0) > 0.0;
             println!(
-                "[SELFTEST] skill whirlwind {} | cd {:.1}",
+                "[SELFTEST] 技能旋风斩 {} | 冷却 {:.1}",
                 if cd_on { "PASS" } else { "FAIL" },
                 game.skills.cd_remaining(0),
             );
@@ -802,7 +802,7 @@ pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
             let load_ok = save::load_game(game).is_ok();
             let restored = game.skills.learned == [1, 1, 1];
             println!(
-                "[SELFTEST] save slot2 {} | file {file_ok} restored {restored}",
+                "[SELFTEST] 存档位二 {} | 文件 {file_ok} 已还原 {restored}",
                 if save_ok && load_ok { "PASS" } else { "FAIL" },
             );
             game.settings.slot = 1;
@@ -849,7 +849,7 @@ pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
                 (m.pos.x - px as f32).abs() < 1.0 && m.pos.y > (deep_surf + 200) as f32
             });
             println!(
-                "[SELFTEST] pit recovery {} | npc_back {npc_ok} monster_cleaned {monster_ok}",
+                "[SELFTEST] 坠坑自救 {} | 居民回地表 {npc_ok} 怪物清理 {monster_ok}",
                 if npc_ok && monster_ok { "PASS" } else { "FAIL" },
             );
         }
@@ -871,7 +871,7 @@ pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
                 .iter()
                 .any(|d| d.to_string_lossy().contains("selftest_proj"));
             println!(
-                "[SELFTEST] project open {} | current {in_proj} mat_in_proj {mat_in_proj} file {has_file} watch {watch_ok}",
+                "[SELFTEST] 工程打开 {} | current {in_proj} 材质在工程内 {mat_in_proj} 文件 {has_file} 监听 {watch_ok}",
                 if in_proj && mat_in_proj && has_file && watch_ok { "PASS" } else { "FAIL" },
             );
             // 关闭工程 → 回到内置资源
@@ -881,7 +881,7 @@ pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
             let builtin = crate::project::path_of("data/materials.ron");
             let back = !builtin.to_string_lossy().contains("selftest_proj") && builtin.exists();
             println!(
-                "[SELFTEST] project close {} | path {}",
+                "[SELFTEST] 工程关闭 {} | 路径 {}",
                 if back { "PASS" } else { "FAIL" },
                 builtin.display(),
             );
@@ -903,7 +903,7 @@ pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
             let advanced = d > 1e-6;
             let npc_moved = game.npcs.list.iter().any(|n| n.state_t > 0);
             println!(
-                "[SELFTEST] ide viewport {} | time {:.4} npc_tick {npc_moved}",
+                "[SELFTEST] IDE视口 {} | 时间 {:.4} 居民推进 {npc_moved}",
                 if advanced && npc_moved { "PASS" } else { "FAIL" },
                 game.world.time
             );

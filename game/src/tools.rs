@@ -5,14 +5,38 @@ use mge_world::World;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tool {
+    /// 剑
     Sword,
+    /// 镐
     Pickaxe,
+    /// 石块
     Block,
+    /// 火把
     Torch,
+    /// 水
     Water,
+    /// 沙
     Sand,
+    /// 弓
     Bow,
+    /// 火球法杖
     Fireball,
+}
+
+impl Tool {
+    /// 中文名（IDE/UI 展示）
+    pub fn name(&self) -> &'static str {
+        match self {
+            Tool::Sword => "剑",
+            Tool::Pickaxe => "镐",
+            Tool::Block => "石块",
+            Tool::Torch => "火把",
+            Tool::Water => "水",
+            Tool::Sand => "沙",
+            Tool::Bow => "弓",
+            Tool::Fireball => "火球法杖",
+        }
+    }
 }
 
 pub const REACH: f32 = 56.0;

@@ -285,7 +285,7 @@ impl ItemDb {
             r -= *w;
         }
         tier = tier.max(min_rarity);
-        let n = tier.saturating_sub(1); // Magic=1, Rare=2, Masterwork=3, Legendary=4
+        let n = tier.saturating_sub(1); // 魔法=1、稀有=2、杰作=3、传说=4
         let ilvl = d.lvl as f32;
         let mut affixes = Vec::new();
         let (mut pre_pool, mut suf_pool): (Vec<&AffixDef>, Vec<&AffixDef>) =

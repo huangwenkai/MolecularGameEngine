@@ -63,7 +63,7 @@ pub struct Renderer {
     bloom_a: Option<wgpu::TextureView>,
     bloom_b: Option<wgpu::TextureView>,
     bloom_size: (u32, u32),
-    bloom_ubo: Vec<wgpu::Buffer>, // [bright, blur_h, blur_v]
+    bloom_ubo: Vec<wgpu::Buffer>, // [亮部提取, 水平模糊, 垂直模糊]
     bloom_bg_layout: wgpu::BindGroupLayout,
     world: Option<(wgpu::Texture, wgpu::TextureView, u32, u32)>,
     palette: Option<wgpu::TextureView>,
@@ -868,7 +868,7 @@ impl Renderer {
         let (tw, th) = (target.width(), target.height());
         self.ensure_scene(tw, th);
 
-        // ---- uniforms ----
+        // ---- uniform 参数写入 ----
         let vp = p.camera.view_proj();
         self.queue
             .write_buffer(&self.camera_buf, 0, bytemuck::cast_slice(&vp.to_cols_array_2d()));
@@ -925,7 +925,7 @@ impl Renderer {
             self.vbuf_verts = 0;
         }
 
-        // ---- bind groups ----
+        // ---- 绑定组 ----
         let atlas_bg = self.atlas.as_ref().map(|v| {
             self.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("atlas-bg"),

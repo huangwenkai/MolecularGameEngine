@@ -286,8 +286,8 @@ impl Engine {
                     let _ = std::fs::create_dir_all(dir);
                 }
                 match img.save(&path) {
-                    Ok(_) => tracing::info!("screenshot saved: {path}"),
-                    Err(e) => tracing::error!("screenshot save failed: {e}"),
+                    Ok(_) => tracing::info!("截图已保存: {path}"),
+                    Err(e) => tracing::error!("截图保存失败: {e}"),
                 }
             }
         }
@@ -324,12 +324,12 @@ impl Engine {
     /// 无头模式：跑固定 tick 数后退出（自测/自动化验收）
     pub fn run_headless<A: App>(&mut self, app: &mut A, frames: u64) {
         self.headless = true;
-        tracing::info!("headless: creating instance");
+        tracing::info!("无头模式：创建图形实例");
         let instance = gpu::create_instance();
         let (gpu, _) = gpu::create_device(&instance, None);
-        tracing::info!("headless: creating renderer");
+        tracing::info!("无头模式：创建渲染器");
         let renderer = Renderer::new(gpu);
-        tracing::info!("headless: renderer ready");
+        tracing::info!("无头模式：渲染器就绪");
         self.camera
             .set_viewport(self.size.0 as f32 / self.camera.zoom, self.size.1 as f32 / self.camera.zoom);
         self.renderer = Some(renderer);
@@ -337,7 +337,7 @@ impl Engine {
             let mut ctx = self.ctx();
             app.init(&mut ctx);
         }
-        tracing::info!("headless: init done, ticking");
+        tracing::info!("无头模式：初始化完成，开始推进逻辑帧");
         for _ in 0..frames {
             self.frame += 1;
             let mut ctx = self.ctx();

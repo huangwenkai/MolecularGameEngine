@@ -102,7 +102,7 @@ impl GameApp {
     pub fn new(seed: u64, selftest: bool) -> Self {
         let veg = editor::load_veg();
         let world = World::new_with_veg(seed, WORLD_W_PX, WORLD_H_PX, &veg.plants);
-        tracing::info!("new: world ok");
+        tracing::info!("初始化：世界创建完成");
         let spawn =
             Vec2::new(world.spawn_x as f32 + 0.5, world.spawn_y as f32);
         let player = Player::new(spawn);
@@ -113,13 +113,13 @@ impl GameApp {
         projectiles.fx_arrow_hit = weapons.arrow_hit.clone();
         projectiles.fx_hit_spark = weapons.hit_spark.clone();
         let vfx = vfx::Vfx::embedded();
-        tracing::info!("new: vfx ok");
+        tracing::info!("初始化：特效库就绪");
         let db = items::ItemDb::embedded();
-        tracing::info!("new: db ok");
+        tracing::info!("初始化：物品库就绪");
         let anims = anim::AnimBank::load();
-        tracing::info!("new: anims ok");
+        tracing::info!("初始化：动画库就绪");
         let mut audio = audio::Audio::new();
-        tracing::info!("new: audio ok");
+        tracing::info!("初始化：音频就绪");
         let settings = settings::Settings::load();
         audio.set_volume(settings.volume);
         // 工程：恢复上次打开的项目（决定素材路径）
@@ -1077,10 +1077,10 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     let mut engine = Engine::new((1280, 720));
     if args.iter().any(|a| a == "--selftest") {
-        tracing::info!("selftest mode");
+        tracing::info!("自测模式启动");
         let mut app = GameApp::new(2026_0924, true);
         engine.run_headless(&mut app, 1350);
-        tracing::info!("selftest done");
+        tracing::info!("自测完成");
     } else {
         let seed = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
