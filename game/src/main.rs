@@ -217,6 +217,89 @@ impl GameApp {
     }
 }
 
+impl GameApp {
+    /// IDE 视口帧：世界模拟 + AI + 纹理上传 + 素材热重载（不读玩家输入，避免面板点击误触发）
+    fn ide_tick(&mut self, ctx: &mut EngineCtx) {
+        self.world.update();
+        let st = self.inv.aggregate(&self.db);
+        let (_deaths, _hurt, _knock) = self.monsters.update(
+            &mut self.world,
+            (&self.player.pos, &self.player.half, &mut self.player.hp, st.mitigation()),
+            &st,
+            &mut self.vfx,
+            &mut self.rng,
+        );
+        let night = self.world.time > 0.58 && self.world.time < 0.95;
+        self.npcs.update(&mut self.world, night, &mut self.rng);
+        self.vfx.update(1.0 / 60.0);
+        self.audio.tick(night);
+        self.audio.tick_ambient(night);
+
+        // 相机跟随玩家（无鼠标偏移）
+        let target = self.player.pos + Vec2::new(0.0, -14.0);
+        ctx.camera.center += (target - ctx.camera.center) * 0.12;
+        self.world.light.player_glow = Some((
+            (self.player.pos.x as i32) / LIGHT_CELL,
+            (self.player.pos.y as i32 - 10) / LIGHT_CELL,
+        ));
+
+        // 世界/光照纹理上传（脏 chunk 粒度）
+        let mut bg_mats: Vec<u8> = ["wood", "leaf", "berry", "rope"]
+            .iter()
+            .filter_map(|n| self.world.mats.id(n))
+            .collect();
+        for id in &self.world.veg_mats {
+            if !bg_mats.contains(id) {
+                bg_mats.push(*id);
+            }
+        }
+        {
+            let mut data = Vec::with_capacity(128 * 128 * 2);
+            for (_ci, rect) in self.world.pending_uploads.drain(..) {
+                self.world.pixels.export_chunk_data(_ci, &mut data);
+                for i in (0..data.len()).step_by(2) {
+                    if bg_mats.contains(&data[i]) {
+                        data[i] += 128;
+                    }
+                }
+                ctx.renderer.upload_world(
+                    rect.x.max(0) as u32,
+                    rect.y.max(0) as u32,
+                    rect.w as u32,
+                    rect.h as u32,
+                    &data,
+                );
+            }
+        }
+        for up in self.world.take_light_uploads() {
+            match up {
+                LightUpload::Full(data) => ctx.renderer.upload_light(&data),
+                LightUpload::Region { x, y, w, h, data } => {
+                    ctx.renderer.upload_light_region(x, y, w, h, &data)
+                }
+            }
+        }
+
+        // 素材热重载：在 IDE 里改文件即时在视口生效
+        if editor::reload_if_changed(self) {
+            let pal = art::palette(&self.world.mats);
+            ctx.renderer.set_palette(&pal);
+        }
+        for (kind, src) in self.editor.shader_req.drain(..) {
+            let _ = ctx.renderer.reload_shader(kind, &src);
+        }
+        if !self.editor.char_dirty.is_empty() {
+            for key in self.editor.char_dirty.drain(..) {
+                if let Some(pt) = self.skin.get(key) {
+                    let (w, h) = pt.img.dimensions();
+                    ctx.renderer.upload_atlas(pt.ax, pt.ay, w, h, pt.img.as_raw());
+                }
+            }
+        }
+    }
+
+}
+
 impl App for GameApp {
     fn init(&mut self, ctx: &mut EngineCtx) {
         // 程序化美术 + 图集上传（含动画帧/人物部件打包）
@@ -333,6 +416,10 @@ impl App for GameApp {
             self.ide.open = !self.ide.open;
         }
         if self.ide.open {
+            // IDE 模式：视口实时预览——run=true 时推进世界/AI（不读玩家输入），否则冻结画面
+            if self.ide.run {
+                self.ide_tick(ctx);
+            }
             self.tick_ms_sum += t0.elapsed().as_secs_f32() * 1000.0;
             self.tick_count += 1;
             return;

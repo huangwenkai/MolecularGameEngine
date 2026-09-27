@@ -10,6 +10,8 @@ use mge_runtime::EngineCtx;
 use winit::event::ElementState;
 
 const PRESS: ElementState = ElementState::Pressed;
+/// IDE 视口测试：记录开 IDE 前的世界时间基准
+static IDE_T0: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
 const RELEASE: ElementState = ElementState::Released;
 
 const SHOTS: &[(u64, &str)] = &[
@@ -885,6 +887,28 @@ pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
             );
             // 清理测试工程，避免留下脏数据
             let _ = std::fs::remove_dir_all("projects/selftest_proj");
+
+            // ---- IDE 视口：打开 IDE + run → 世界与 AI 继续推进 ----
+            let _ = IDE_T0.set(game.world.time);
+            game.ide.open = true;
+            game.ide.run = true;
+            game.ide.tab = 0;
+        }
+        1320 => {
+            let t0 = IDE_T0.get().copied().unwrap_or(0.0);
+            let mut d = game.world.time - t0;
+            if d < 0.0 {
+                d += 1.0; // 跨天回卷
+            }
+            let advanced = d > 1e-6;
+            let npc_moved = game.npcs.list.iter().any(|n| n.state_t > 0);
+            println!(
+                "[SELFTEST] ide viewport {} | time {:.4} npc_tick {npc_moved}",
+                if advanced && npc_moved { "PASS" } else { "FAIL" },
+                game.world.time
+            );
+            let _ = ();
+            game.ide.open = false;
         }
         _ => {}
     }
