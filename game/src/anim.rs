@@ -263,20 +263,56 @@ impl AnimBank {
             }
             let (fx_n, fy_n) = (w / fw, h / fh);
             let total = fx_n * fy_n;
+            // 第一遍：切出全部帧，并计算整组帧非透明像素的联合包围盒
+            // （用同一包围盒裁剪所有帧 → 保持帧间对齐，动画不抖动）
+            let mut frames_img: Vec<image::RgbaImage> = Vec::with_capacity(total as usize);
+            let (mut bx0, mut by0, mut bx1, mut by1) = (fw, fh, 0u32, 0u32);
+            for i in 0..total {
+                let (sx, sy) = ((i % fx_n) * fw, (i / fx_n) * fh);
+                let f = image::imageops::crop_imm(&img, sx, sy, fw, fh).to_image();
+                for (x, y, p) in f.enumerate_pixels() {
+                    if p.0[3] > 8 {
+                        bx0 = bx0.min(x);
+                        by0 = by0.min(y);
+                        bx1 = bx1.max(x + 1);
+                        by1 = by1.max(y + 1);
+                    }
+                }
+                frames_img.push(f);
+            }
+            if bx0 >= bx1 || by0 >= by1 {
+                continue; // 全透明帧
+            }
+            // 2px 内边距（防裁到发光/描边），并夹紧到帧内
+            const PAD: u32 = 2;
+            let cx0 = bx0.saturating_sub(PAD);
+            let cy0 = by0.saturating_sub(PAD);
+            let cw_ = (bx1 - bx0 + PAD * 2).min(fw - cx0);
+            let ch_ = (by1 - by0 + PAD * 2).min(fh - cy0);
+            // 等比缩放：内容长边 → OUT，短边居中透明填充（不变形）
+            let scale = OUT as f32 / cw_.max(ch_).max(1) as f32;
+            let dw = ((cw_ as f32 * scale).round() as u32).clamp(1, OUT);
+            let dh = ((ch_ as f32 * scale).round() as u32).clamp(1, OUT);
             // 组合网格：ceil(sqrt(total)) 列
             let cols = ((total as f32).sqrt().ceil()) as u32;
             let rows = (total + cols - 1) / cols;
             let mut sheet = image::RgbaImage::new(cols * OUT, rows * OUT);
             for i in 0..total {
-                let (sx, sy) = ((i % fx_n) * fw, (i / fx_n) * fh);
-                let frame = image::imageops::resize(
-                    &image::imageops::crop_imm(&img, sx, sy, fw, fh).to_image(),
-                    OUT,
-                    OUT,
+                let cropped =
+                    image::imageops::crop_imm(&frames_img[i as usize], cx0, cy0, cw_, ch_)
+                        .to_image();
+                let resized = image::imageops::resize(
+                    &cropped,
+                    dw,
+                    dh,
                     image::imageops::FilterType::Nearest,
                 );
-                let (ox, oy) = ((i % cols) * OUT, (i / cols) * OUT);
-                image::imageops::replace(&mut sheet, &frame, ox as i64, oy as i64);
+                let mut frame = image::RgbaImage::new(OUT, OUT);
+                let ox = ((OUT - dw) / 2) as i64;
+                let oy = ((OUT - dh) / 2) as i64;
+                image::imageops::replace(&mut frame, &resized, ox, oy);
+                let (gx, gy) = ((i % cols) * OUT, (i / cols) * OUT);
+                image::imageops::replace(&mut sheet, &frame, gx as i64, gy as i64);
             }
             let target_dir = crate::project::dir_of("anims");
             let _ = std::fs::create_dir_all(&target_dir);
