@@ -125,6 +125,10 @@ impl GameApp {
         // 工程：恢复上次打开的项目（决定素材路径）
         let mut project = project::ProjectManager::default();
         project.load_state();
+        // IDE 配置（界面字号等）
+        let mut ide = ide::Ide::default();
+        ide.font_size = ide::IdeConfig::load().font_size;
+        ide.cfg_loaded = true;
         if let Some(p) = &project.current {
             tracing::info!("已恢复工程「{}」({})", p.name, p.root.display());
         }
@@ -163,7 +167,7 @@ impl GameApp {
             skin: character::load(),
             skills: skills::Skills::default(),
             project,
-            ide: ide::Ide::default(),
+            ide,
             fs_watcher,
             fs_events,
             settings_ui: settings::SettingsUi::default(),

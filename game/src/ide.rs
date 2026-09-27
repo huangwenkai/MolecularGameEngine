@@ -8,7 +8,58 @@
 use crate::project;
 use crate::GameApp;
 use egui::{Color32, Margin, RichText, Stroke};
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+
+/// IDE 配置持久化路径
+const CFG_PATH: &str = "saves/ide_config.ron";
+/// 默认字号（px）
+pub const DEFAULT_FONT: f32 = 13.0;
+
+/// IDE 配置（持久化到 saves/ide_config.ron）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IdeConfig {
+    /// 界面字号（px，默认 13）
+    #[serde(default = "default_font")]
+    pub font_size: f32,
+}
+
+fn default_font() -> f32 {
+    DEFAULT_FONT
+}
+
+impl Default for IdeConfig {
+    fn default() -> Self {
+        Self { font_size: DEFAULT_FONT }
+    }
+}
+
+impl IdeConfig {
+    pub fn load() -> Self {
+        match std::fs::read_to_string(CFG_PATH) {
+            Ok(s) => ron::from_str::<Self>(&s).unwrap_or_default(),
+            Err(_) => Self::default(),
+        }
+    }
+
+    pub fn save(&self) {
+        let _ = std::fs::create_dir_all("saves");
+        if let Ok(txt) = ron::ser::to_string_pretty(self, Default::default()) {
+            let tmp = format!("{CFG_PATH}.tmp");
+            if std::fs::write(&tmp, txt).is_ok() {
+                let _ = std::fs::rename(&tmp, CFG_PATH);
+            }
+        }
+    }
+}
+
+/// 把当前 Ui（及其子 Ui）的全部文本样式字号统一设为 size
+fn set_font(ui: &mut egui::Ui, size: f32) {
+    let s = ui.style_mut();
+    for (_kind, fid) in s.text_styles.iter_mut() {
+        fid.size = size;
+    }
+}
 
 // ---------------------------------------------------------------------------
 // 主题色（IDE 统一配色）
@@ -57,6 +108,9 @@ pub struct Ide {
     pub imp_msg: Option<String>,
     // ---- 工程导出 ----
     pub export_msg: Option<String>,
+    // ---- IDE 配置 ----
+    pub font_size: f32,
+    pub cfg_loaded: bool,
     // ---- 各区块展开状态 ----
     pub sec_proj: bool,
     pub sec_assets: bool,
@@ -64,6 +118,7 @@ pub struct Ide {
     pub sec_ent: bool,
     pub sec_file: bool,
     pub sec_tools: bool,
+    pub sec_cfg: bool,
 }
 
 impl Default for Ide {
@@ -86,15 +141,20 @@ impl Default for Ide {
             imp_fh: 16,
             imp_msg: None,
             export_msg: None,
+            font_size: DEFAULT_FONT,
+            cfg_loaded: false,
             sec_proj: true,
             sec_assets: true,
             sec_scene: true,
             sec_ent: true,
             sec_file: true,
             sec_tools: false,
+            sec_cfg: true,
         }
     }
 }
+
+
 
 fn is_text(p: &PathBuf) -> bool {
     matches!(
@@ -184,6 +244,8 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
                 .inner_margin(Margin::ZERO),
         )
         .show(ctx, |ui| {
+            // IDE 统一字号（配置可调，默认 13px）
+            set_font(ui, app.ide.font_size);
             // 模块之间零间距（标题栏与区块紧贴）
             ui.spacing_mut().item_spacing.y = 0.0;
             // 标题栏（直角满宽）
@@ -334,6 +396,7 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
                 .inner_margin(Margin::ZERO),
         )
         .show(ctx, |ui| {
+            set_font(ui, app.ide.font_size);
             ui.spacing_mut().item_spacing.y = 0.0;
             egui::Frame::NONE
                 .fill(BG_BAR)
@@ -369,6 +432,12 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
                     draw_asset_tools(ui, app);
                 });
                 app.ide.sec_tools = open;
+                // ---- IDE 配置 ----
+                let mut open = app.ide.sec_cfg;
+                section(ui, "配置", &mut open, |ui| {
+                    draw_ide_config(ui, app);
+                });
+                app.ide.sec_cfg = open;
             });
         });
 
@@ -382,6 +451,7 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
             egui::Frame::NONE.fill(Color32::TRANSPARENT)
         })
         .show(ctx, |ui| {
+            set_font(ui, app.ide.font_size);
             // 工具条与内容区零间距堆叠（消除缝隙）
             ui.spacing_mut().item_spacing.y = 0.0;
             // 顶部工具条：直角、满宽、底部分隔线（圆角会在四角透出游戏画面）
@@ -599,6 +669,26 @@ fn draw_file_props(ui: &mut egui::Ui, app: &mut GameApp) {
             }
         }
     });
+}
+
+/// IDE 配置面板：界面字号（默认 13px，持久化到 saves/ide_config.ron）
+fn draw_ide_config(ui: &mut egui::Ui, app: &mut GameApp) {
+    ui.horizontal(|ui| {
+        ui.label("界面字号");
+        let r = ui.add(
+            egui::Slider::new(&mut app.ide.font_size, 10.0..=20.0)
+                .step_by(1.0)
+                .suffix(" px"),
+        );
+        if r.drag_stopped() || r.changed() {
+            IdeConfig { font_size: app.ide.font_size }.save();
+        }
+    });
+    if ui.button(format!("恢复默认（{} px）", DEFAULT_FONT)).clicked() {
+        app.ide.font_size = DEFAULT_FONT;
+        IdeConfig { font_size: DEFAULT_FONT }.save();
+    }
+    ui.weak("字号对整个 IDE 界面生效，保存在 saves/ide_config.ron");
 }
 
 fn draw_asset_tools(ui: &mut egui::Ui, app: &mut GameApp) {
