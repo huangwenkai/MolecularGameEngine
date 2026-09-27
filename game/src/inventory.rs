@@ -225,7 +225,10 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
     if !app.inv.ui_open {
         return;
     }
-    egui::Window::new("背包 [I]").show(ctx, |ui| {
+    egui::Window::new("背包 [I]")
+        .default_width(430.0)
+        .max_width(470.0)
+        .show(ctx, |ui| {
         let st = app.inv.aggregate(&app.db);
         let max_hp = app.inv.max_hp(&app.db);
 
@@ -349,10 +352,15 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
         });
         ui.separator();
 
-        // ---- 背包格子 ----
+        // ---- 背包格子（6 列自动换行 + 高度限制，超出滚动）----
         ui.label("背包（点击装备/使用，可拖拽）");
-        let mut used_click: Option<usize> = None;
-        egui::Grid::new("bag_grid").spacing([4.0, 4.0]).show(ui, |ui| {
+        const BAG_COLS: usize = 6;
+        let used_click = egui::ScrollArea::vertical()
+            .max_height(5.0 * 48.0)
+            .auto_shrink([false, true])
+            .show(ui, |ui| {
+                let mut used_click: Option<usize> = None;
+                egui::Grid::new("bag_grid").spacing([4.0, 4.0]).show(ui, |ui| {
             for idx in 0..app.inv.bag.len() {
                 let cell = egui::Frame::NONE
                     .fill(Color32::from_gray(28))
@@ -407,9 +415,15 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
                     used_click = Some(idx);
                 }
                 item_tooltip(resp.clone(), app, app.inv.bag[idx].as_ref(), Some(idx));
+                // 自动换行：每 6 格换一行（最后一行不足 6 格由 Grid 收尾）
+                if (idx + 1) % BAG_COLS == 0 {
+                    ui.end_row();
+                }
             }
-            ui.end_row();
-        });
+            });
+                used_click
+            })
+            .inner;
 
         // 点击处理（放在 grid 外避免借用冲突）
         if let Some(idx) = used_click {
