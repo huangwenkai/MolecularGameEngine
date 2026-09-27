@@ -356,6 +356,7 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
         ui.label("背包（点击装备/使用，可拖拽）");
         const BAG_COLS: usize = 6;
         let used_click = egui::ScrollArea::vertical()
+            .id_salt("inv_bag_scroll")
             .max_height(5.0 * 48.0)
             .auto_shrink([false, true])
             .show(ui, |ui| {

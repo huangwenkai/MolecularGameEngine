@@ -116,25 +116,28 @@ fn section(
         .corner_radius(6.0)
         .inner_margin(Margin::same(6))
         .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                let icon = if *open { "▼" } else { "▶" };
-                let label = RichText::new(format!("{icon} {title}"))
-                    .color(if *open { ACCENT } else { DIM })
-                    .strong();
-                let resp = ui.add(
-                    egui::Button::new(label)
-                        .fill(Color32::TRANSPARENT)
-                        .stroke(Stroke::NONE)
-                        .min_size(egui::vec2(ui.available_width(), 20.0)),
-                );
-                if resp.clicked() {
-                    *open = !*open;
+            // 区块内控件统一包一层 ID 作用域，避免 ScrollArea/按钮等 ID 冲突
+            ui.push_id(title, |ui| {
+                ui.horizontal(|ui| {
+                    let icon = if *open { "▼" } else { "▶" };
+                    let label = RichText::new(format!("{icon} {title}"))
+                        .color(if *open { ACCENT } else { DIM })
+                        .strong();
+                    let resp = ui.add(
+                        egui::Button::new(label)
+                            .fill(Color32::TRANSPARENT)
+                            .stroke(Stroke::NONE)
+                            .min_size(egui::vec2(ui.available_width(), 20.0)),
+                    );
+                    if resp.clicked() {
+                        *open = !*open;
+                    }
+                });
+                if *open {
+                    ui.separator();
+                    body(ui);
                 }
             });
-            if *open {
-                ui.separator();
-                body(ui);
-            }
         });
     ui.add_space(4.0);
 }
@@ -191,7 +194,9 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
                 });
             ui.add_space(6.0);
 
-            egui::ScrollArea::vertical().show(ui, |ui| {
+            egui::ScrollArea::vertical()
+                .id_salt("ide_left_scroll")
+                .show(ui, |ui| {
                 // ---- 工程 ----
                 section(ui, "🗂 工程", &mut app.ide.sec_proj, |ui| {
                     ui.horizontal(|ui| {
@@ -249,6 +254,7 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
                             label,
                             files.len()
                         ))
+                        .id_salt(format!("ide_assets_group_{kind}"))
                         .default_open(kind == 0)
                         .show(ui, |ui| {
                             for p in files {
@@ -340,7 +346,9 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
                     ui.label(RichText::new("检查器 Inspector").strong().color(ACCENT));
                 });
             ui.add_space(6.0);
-            egui::ScrollArea::vertical().show(ui, |ui| {
+            egui::ScrollArea::vertical()
+                .id_salt("ide_right_scroll")
+                .show(ui, |ui| {
                 // ---- 实体属性 ----
                 let mut open = app.ide.sec_ent;
                 section(ui, "🧩 实体属性", &mut open, |ui| {
@@ -588,6 +596,7 @@ fn draw_file_props(ui: &mut egui::Ui, app: &mut GameApp) {
 
 fn draw_asset_tools(ui: &mut egui::Ui, app: &mut GameApp) {
     egui::CollapsingHeader::new("📥 导入精灵表")
+        .id_salt("ide_import_sheet")
         .default_open(false)
         .show(ui, |ui| {
             ui.horizontal(|ui| {
@@ -736,7 +745,7 @@ fn draw_file_view(ui: &mut egui::Ui, app: &mut GameApp) {
         if ui.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::S)) {
             save_text(app);
         }
-        egui::ScrollArea::both().show(ui, |ui| {
+        egui::ScrollArea::both().id_salt("ide_file_text_scroll").show(ui, |ui| {
             let r = ui.add_sized(
                 ui.available_size(),
                 egui::TextEdit::multiline(&mut app.ide.text).font(egui::TextStyle::Monospace),
