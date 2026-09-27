@@ -215,7 +215,8 @@ fn cast_heal(app: &mut GameApp) -> bool {
 
 /// 技能 HUD（左下角）：键位 + 冷却状态
 pub fn draw_hud(app: &GameApp, ctx: &egui::Context) {
-    if app.settings_ui.open {
+    // 设置面板/引擎 IDE 打开时不绘制（IDE 独占界面，HUD 为 Area 前景层会压在其上）
+    if app.settings_ui.open || app.ide.open {
         return;
     }
     egui::Area::new(egui::Id::new("skills_hud"))

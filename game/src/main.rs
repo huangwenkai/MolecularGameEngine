@@ -938,21 +938,26 @@ impl App for GameApp {
         // ---- 特效编辑器面板（egui，窗口模式）----
         if let Some(egui) = ctx.egui {
             self.ensure_cjk_fonts(egui);
-            self.monsters.draw_boss_bar(egui);
-            editor::draw(self, egui);
-            inventory::draw(self, egui);
-            skills::draw_hud(self, egui);
-            ide::draw(self, egui);
-            let snap = debug::DbgSnapshot::of(self);
-            self.dbg.draw(&snap, egui);
-            self.settings_ui
-                .draw(&mut self.settings, &mut self.audio, ctx.input, egui);
+            if self.ide.open {
+                // IDE 独占界面：只绘制 IDE（技能 HUD/Boss 血条等是 Area 前景层，会压在面板之上）
+                ide::draw(self, egui);
+            } else {
+                self.monsters.draw_boss_bar(egui);
+                editor::draw(self, egui);
+                inventory::draw(self, egui);
+                skills::draw_hud(self, egui);
+                let snap = debug::DbgSnapshot::of(self);
+                self.dbg.draw(&snap, egui);
+                self.settings_ui
+                    .draw(&mut self.settings, &mut self.audio, ctx.input, egui);
+            }
         }
         // ---- 新手引导 ----
         if self.guide_t > 0.0
             && !self.editor.open
             && !self.inv.ui_open
             && !self.settings_ui.open
+            && !self.ide.open
         {
             if let Some(egui) = ctx.egui {
                 Area::new(Id::new("guide"))

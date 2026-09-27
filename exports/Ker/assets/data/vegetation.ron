@@ -1,0 +1,40 @@
+// 植被定义表 —— 植被编辑器（F1 → 植被页）读写；运行时热重载
+// biomes: forest 森林 | snow 雪原 | desert 沙漠（空 = 全部生物群系）
+// ground: 可生成的地表材质名（空 = 任意实心地表面）
+// kind: Grass 草丛 | Flower 花 | Bush 灌木 | Mushroom 蘑菇 | Cactus 仙人掌
+// body: 主体材质（草叶/花瓣/树冠/伞盖/柱身）；stem: 茎干材质（可选，花/蘑菇用）
+// h/w: 高度/宽度像素范围；density: 每列生成概率；gap: 同种植被最小间距 px
+// 植被为背景层像素（与树同层，不碰撞、不遮挡角色），材质在 materials.ron 中定义
+(
+    plants: [
+        // ---- 森林 ----
+        (name: "野草",       biomes: ["forest"], ground: ["grass"],     density: 0.10,  gap: 2,
+         kind: Grass,    body: "tall_grass",    stem: None, h: (3, 7),   w: (2, 4)),
+        (name: "红花",       biomes: ["forest"], ground: ["grass"],     density: 0.012, gap: 6,
+         kind: Flower,   body: "flower_red",    stem: Some("tall_grass"), h: (5, 9),  w: (2, 3)),
+        (name: "黄花",       biomes: ["forest"], ground: ["grass"],     density: 0.010, gap: 6,
+         kind: Flower,   body: "flower_yellow", stem: Some("tall_grass"), h: (5, 9),  w: (2, 3)),
+        (name: "蓝花",       biomes: ["forest"], ground: ["grass"],     density: 0.008, gap: 6,
+         kind: Flower,   body: "flower_blue",   stem: Some("tall_grass"), h: (5, 9),  w: (2, 3)),
+        (name: "灌木",       biomes: ["forest"], ground: ["grass"],     density: 0.006, gap: 24,
+         kind: Bush,     body: "bush_leaf",     stem: None, h: (4, 7),   w: (5, 9)),
+        (name: "蘑菇",       biomes: ["forest"], ground: ["grass"],     density: 0.004, gap: 16,
+         kind: Mushroom, body: "mushroom_cap",  stem: Some("mushroom_stem"), h: (4, 7), w: (2, 4)),
+
+        // ---- 雪原 ----
+        (name: "霜草",       biomes: ["snow"],   ground: ["snowpack"],  density: 0.05,  gap: 3,
+         kind: Grass,    body: "frost_shrub",   stem: None, h: (2, 4),   w: (2, 3)),
+        (name: "雪绒花",     biomes: ["snow"],   ground: ["snowpack"],  density: 0.006, gap: 10,
+         kind: Flower,   body: "flower_white",  stem: Some("frost_shrub"), h: (4, 7), w: (2, 3)),
+        (name: "枯灌木",     biomes: ["snow"],   ground: ["snowpack"],  density: 0.004, gap: 28,
+         kind: Bush,     body: "dead_bush",     stem: None, h: (3, 5),   w: (4, 7)),
+
+        // ---- 沙漠 ----
+        (name: "干草",       biomes: ["desert"], ground: ["sandstone"], density: 0.03,  gap: 3,
+         kind: Grass,    body: "dry_grass",     stem: None, h: (2, 5),   w: (2, 3)),
+        (name: "枯灌木沙漠", biomes: ["desert"], ground: ["sandstone"], density: 0.008, gap: 28,
+         kind: Bush,     body: "dead_bush",     stem: None, h: (3, 5),   w: (4, 7)),
+        (name: "仙人掌",     biomes: ["desert"], ground: ["sandstone"], density: 0.004, gap: 48,
+         kind: Cactus,   body: "cactus",        stem: None, h: (12, 20), w: (3, 5)),
+    ],
+)
