@@ -41,6 +41,45 @@ impl Tool {
 
 pub const REACH: f32 = 56.0;
 
+/// 2px 吸附：放置类工具对齐偶数坐标，保证直线
+pub fn snap2(v: f32) -> i32 {
+    ((v as i32) >> 1) << 1
+}
+
+/// 放置保护：目标像素与玩家身体（外扩 1px）重叠时禁止放置（防止把自己砌进地形）
+pub fn overlaps_player(x: i32, y: i32, player_pos: Vec2, player_half: Vec2) -> bool {
+    let px = x as f32 + 0.5;
+    let py = y as f32 + 0.5;
+    px >= player_pos.x - player_half.x - 1.0
+        && px <= player_pos.x + player_half.x + 1.0
+        && py >= player_pos.y - player_half.y * 2.0 - 1.0
+        && py <= player_pos.y + 1.0
+}
+
+/// 目标 4×4 区域（吸附中心 cx,cy）能否放置方块：任一像素可放即 true。
+/// 与实际放置判定一致（预览/落点永不漂移）。
+pub fn block_placable(world: &World, cx: i32, cy: i32, player_pos: Vec2, player_half: Vec2) -> bool {
+    for dy in -2..2 {
+        for dx in -2..2 {
+            let (tx, ty) = (cx + dx, cy + dy);
+            if world.pixels.get(tx, ty).mat == 0
+                && !world.solid_px(tx, ty)
+                && !overlaps_player(tx, ty, player_pos, player_half)
+            {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// 火把能否放置（与 place_torch 的前置条件近似：格子空 + 不与玩家重叠）
+pub fn torch_placable(world: &World, cx: i32, cy: i32, player_pos: Vec2, player_half: Vec2) -> bool {
+    world.pixels.get(cx, cy).mat == 0
+        && !world.solid_px(cx, cy)
+        && !overlaps_player(cx, cy, player_pos, player_half)
+}
+
 impl Tool {
     pub fn from_slot(n: u8) -> Tool {
         match n {
@@ -89,22 +128,10 @@ pub fn update(
 
     let dist = (mouse_world - player_pos).length();
     let in_reach = dist <= REACH;
-    // 2px 吸附：放置类工具对齐偶数坐标，保证直线
-    let snap = |v: f32| ((v as i32) >> 1) << 1;
-    let cx = snap(mouse_world.x);
-    let cy = snap(mouse_world.y);
+    let cx = snap2(mouse_world.x);
+    let cy = snap2(mouse_world.y);
     let free = mouse_world.x as i32;
     let fy = mouse_world.y as i32;
-
-    // 放置保护：目标像素与玩家身体（外扩 1px）重叠时禁止放置（防止把自己砌进地形）
-    let overlaps_player = |x: i32, y: i32| -> bool {
-        let px = x as f32 + 0.5;
-        let py = y as f32 + 0.5;
-        px >= player_pos.x - player_half.x - 1.0
-            && px <= player_pos.x + player_half.x + 1.0
-            && py >= player_pos.y - player_half.y * 2.0 - 1.0
-            && py <= player_pos.y + 1.0
-    };
 
     match t.tool {
         Tool::Sword => {
@@ -157,7 +184,7 @@ pub fn update(
                         let (tx, ty) = (cx + dx, cy + dy);
                         if world.pixels.get(tx, ty).mat == 0
                             && !world.solid_px(tx, ty)
-                            && !overlaps_player(tx, ty)
+                            && !overlaps_player(tx, ty, player_pos, player_half)
                         {
                             world.pixels.spawn(tx, ty, mat, &world.mats);
                             placed = true;

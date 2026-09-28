@@ -1118,13 +1118,76 @@ impl App for GameApp {
             batch.push_at(Vec2::new(fx, fy - 2.5), Vec2::new(3.0, 7.0), torch_region, [1.0; 4]);
         }
 
-        // ---- 放置预览 ----
-        if matches!(self.tool.tool, Tool::Block | Tool::Torch) {
+        // ---- 放置预览：吸附到真实落点，绿=可放/红=不可放；范围圈提示够不够得着 ----
+        if matches!(self.tool.tool, Tool::Block | Tool::Torch | Tool::Water | Tool::Sand) {
+            let white = self.regions.get("white").unwrap();
             let m = self.mouse_world;
-            if (m - self.player.pos).length() <= tools::REACH {
-                let white = self.regions.get("white").unwrap();
-                let size = if self.tool.tool == Tool::Block { 4.0 } else { 2.0 };
-                batch.push_at(m, Vec2::splat(size), white, [1.0, 1.0, 1.0, 0.35]);
+            let in_reach = (m - self.player.pos).length() <= tools::REACH;
+
+            // 攻击范围圈（虚线点环：范围内白色微光，范围外红色提示）
+            {
+                const SEG: usize = 28;
+                let ring = if in_reach { [0.9, 0.9, 0.9, 0.10] } else { [1.0, 0.35, 0.3, 0.16] };
+                for i in 0..SEG {
+                    let a = i as f32 * std::f32::consts::TAU / SEG as f32;
+                    let p = self.player.pos
+                        + Vec2::new(a.cos() * tools::REACH, a.sin() * tools::REACH);
+                    batch.push_at(p, Vec2::splat(1.4), white, ring);
+                }
+            }
+
+            match self.tool.tool {
+                Tool::Block => {
+                    // 4×4 足印吸附到 2px 网格（与放置完全同判定）
+                    let (cx, cy) = (tools::snap2(m.x), tools::snap2(m.y));
+                    let ok = in_reach
+                        && tools::block_placable(
+                            &self.world,
+                            cx,
+                            cy,
+                            self.player.pos,
+                            self.player.half,
+                        );
+                    let (r, g, b) = if ok { (0.45, 1.0, 0.55) } else { (1.0, 0.35, 0.35) };
+                    let c = Vec2::new(cx as f32, cy as f32);
+                    batch.push_at(c, Vec2::splat(6.0), white, [1.0, 1.0, 1.0, 0.30]); // 1px 白边框
+                    batch.push_at(c, Vec2::splat(4.0), white, [r, g, b, 0.50]); // 足印
+                }
+                Tool::Torch => {
+                    // 火把预览：按真实贴图位置半透明预显（绿/红染表示有效性）
+                    let (cx, cy) = (tools::snap2(m.x), tools::snap2(m.y));
+                    let ok = in_reach
+                        && tools::torch_placable(
+                            &self.world,
+                            cx,
+                            cy,
+                            self.player.pos,
+                            self.player.half,
+                        );
+                    let tint = if ok { [0.5, 1.0, 0.6, 0.55] } else { [1.0, 0.4, 0.4, 0.55] };
+                    batch.push_at(
+                        Vec2::new(cx as f32, cy as f32 - 2.5),
+                        Vec2::new(3.0, 7.0),
+                        torch_region,
+                        tint,
+                    );
+                }
+                _ => {
+                    // 水/沙：倾倒区域（半径 3 圆盘，与实际撒点范围一致）
+                    let (r, g, b) = if self.tool.tool == Tool::Water { (0.3, 0.6, 1.0) } else { (0.9, 0.8, 0.4) };
+                    for dy in -3..=3 {
+                        for dx in -3..=3 {
+                            if dx * dx + dy * dy <= 9 {
+                                batch.push_at(
+                                    m + Vec2::new(dx as f32, dy as f32),
+                                    Vec2::splat(1.0),
+                                    white,
+                                    [r, g, b, 0.30],
+                                );
+                            }
+                        }
+                    }
+                }
             }
         }
 
