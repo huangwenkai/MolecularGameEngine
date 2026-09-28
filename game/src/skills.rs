@@ -261,24 +261,13 @@ fn cast_lightning(app: &mut GameApp, ctx: &mut EngineCtx) -> bool {
         }
     }
 
-    // ---- 天降雷链：自上而下的锯齿光链（段间抖动 + 密集布点）----
+    // ---- 天降雷击：真锯齿闪电链（自上而下，主线+分支）----
     let top = strike + Vec2::new(0.0, -240.0);
-    let (n, steps) = (9usize, 4usize);
-    let mut prev = top;
-    for i in 1..=n {
-        let t = i as f32 / n as f32;
-        let jitter = if i == n {
-            Vec2::ZERO
-        } else {
-            Vec2::new(app.rng.range_f32(-10.0, 10.0), 0.0)
-        };
-        let next = top.lerp(strike, t) + jitter;
-        for s in 0..steps {
-            let q = prev.lerp(next, s as f32 / steps as f32);
-            app.vfx.dot(q, Vec2::ZERO, 0.22, 2.2, [0.8, 0.9, 1.0], 0.0, true);
-        }
-        prev = next;
-    }
+    app.vfx.bolt(top, strike, &mut app.rng, 0.22);
+    let flick = strike
+        + Vec2::new(app.rng.range_f32(-16.0, 16.0), 0.0)
+        + Vec2::new(0.0, -60.0);
+    app.vfx.bolt(top + Vec2::new(3.0, 0.0), flick, &mut app.rng, 0.13);
     // 落点闪光 + 四散火花
     app.vfx.dot(strike, Vec2::ZERO, 0.3, 4.0, [1.0, 1.0, 1.0], 0.0, true);
     for _ in 0..10 {

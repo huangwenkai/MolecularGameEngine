@@ -427,27 +427,12 @@ impl GameApp {
         // 手部聚能闪光
         self.vfx.dot(hand, Vec2::ZERO, 0.2, 3.0, [0.85, 0.92, 1.0], 0.0, true);
         self.vfx.dot(hand, Vec2::ZERO, 0.15, 1.6, [1.0, 1.0, 1.0], 0.0, true);
-        let (n, steps) = (14usize, 4usize);
-        let mut prev = hand;
-        for i in 1..=n {
-            let t = i as f32 / n as f32;
-            let jitter = if i == n {
-                Vec2::ZERO
-            } else {
-                Vec2::new(
-                    self.rng.range_f32(-9.0, 9.0),
-                    self.rng.range_f32(-8.0, 8.0),
-                )
-            };
-            let next = hand.lerp(strike, t) + jitter;
-            for s in 0..steps {
-                let q = prev.lerp(next, s as f32 / steps as f32);
-                // 辉光层（宽）+ 白炽核心（窄）：闪电有体积感
-                self.vfx.dot(q, Vec2::ZERO, 0.22, 3.2, [0.55, 0.7, 1.0], 0.0, true);
-                self.vfx.dot(q, Vec2::ZERO, 0.22, 1.7, [1.0, 1.0, 1.0], 0.0, true);
-            }
-            prev = next;
-        }
+        // 主闪电 + 一道错位余闪（更凌乱真实）
+        self.vfx.bolt(hand, strike, &mut self.rng, 0.22);
+        let flick = strike
+            + Vec2::new(self.rng.range_f32(-14.0, 14.0), self.rng.range_f32(-10.0, 10.0));
+        self.vfx
+            .bolt(hand + Vec2::new(2.0, 2.0), flick, &mut self.rng, 0.13);
         // 落点：双层爆闪 + 冲击环（12 个径向火花）+ 少量飞散电屑
         self.vfx.dot(strike, Vec2::ZERO, 0.3, 4.5, [0.55, 0.7, 1.0], 0.0, true);
         self.vfx.dot(strike, Vec2::ZERO, 0.25, 2.5, [1.0, 1.0, 1.0], 0.0, true);

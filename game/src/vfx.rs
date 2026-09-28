@@ -107,9 +107,18 @@ pub struct Blueprint {
     pub emitters: Vec<Emitter>,
 }
 
+/// 闪电链：锯齿折线段（起点、终点、线宽），粗线段渲染（辉光层 + 白炽核心）
+pub struct Bolt {
+    segs: Vec<(Vec2, Vec2, f32)>,
+    life: f32,
+    max_life: f32,
+}
+
 pub struct Vfx {
     pub particles: Vec<Particle>,
     pub texts: Vec<FloatText>,
+    /// 闪电链（锯齿折线，粗线段渲染）
+    pub bolts: Vec<Bolt>,
     pub bps: HashMap<String, Blueprint>,
 }
 
@@ -120,7 +129,7 @@ impl Vfx {
             "../assets/data/vfx.ron"
         ))
         .expect("vfx.ron 解析失败");
-        Self { particles: Vec::new(), texts: Vec::new(), bps }
+        Self { particles: Vec::new(), texts: Vec::new(), bolts: Vec::new(), bps }
     }
 
     /// 触发命名特效，返回 (震屏, 顿帧)
@@ -186,6 +195,56 @@ impl Vfx {
         }
     }
 
+    /// 生成一道锯齿闪电链：主线（中点位移法，中段抖动大两端收敛）+ 1~2 条细分支
+    pub fn bolt(&mut self, from: Vec2, to: Vec2, rng: &mut Rng, life: f32) {
+        const MAX_BOLTS: usize = 24;
+        if self.bolts.len() >= MAX_BOLTS {
+            return;
+        }
+        let dir = (to - from).normalize_or_zero();
+        let perp = Vec2::new(-dir.y, dir.x);
+        let len = (to - from).length();
+        // 主线：细分子段，垂直方向随机偏移（正弦包络：中段大、两端收敛）
+        let n = 11usize;
+        let mut pts = Vec::with_capacity(n + 1);
+        pts.push(from);
+        for i in 1..n {
+            let t = i as f32 / n as f32;
+            let amp = (std::f32::consts::PI * t).sin() * len * 0.09;
+            pts.push(from.lerp(to, t) + perp * rng.range_f32(-amp, amp));
+        }
+        pts.push(to);
+        let mut segs: Vec<(Vec2, Vec2, f32)> = Vec::new();
+        let m = pts.len();
+        for (i, w) in pts.windows(2).enumerate() {
+            let taper = 1.0 - 0.45 * (i as f32 / (m - 1) as f32); // 越接近落点越细
+            segs.push((w[0], w[1], 1.7 * taper));
+        }
+        // 分支：从主线中后段随机点斜向外延伸（更细，末端更细）
+        let branches = rng.range_i32(1, 2);
+        for _ in 0..branches {
+            let si = rng.range_i32(3, (n / 2 + 2).max(4) as i32) as usize;
+            let Some(&sp) = pts.get(si) else { continue };
+            let side = if rng.chance(0.5) { 1.0 } else { -1.0 };
+            let ang = dir.y.atan2(dir.x) + side * rng.range_f32(0.6, 1.1);
+            let blen = len * rng.range_f32(0.12, 0.28);
+            let bend = Vec2::new(ang.cos(), ang.sin()) * blen;
+            let end = sp + bend + perp * rng.range_f32(-4.0, 4.0);
+            let bn = 3usize;
+            let mut bp = sp;
+            for j in 1..=bn {
+                let t = j as f32 / bn as f32;
+                let amp = (std::f32::consts::PI * t).sin() * blen * 0.18;
+                let np = sp.lerp(end, t)
+                    + perp * rng.range_f32(-amp, amp)
+                    + dir * rng.range_f32(-3.0, 3.0);
+                segs.push((bp, np, 0.9 * (1.0 - t as f32 * 0.5)));
+                bp = np;
+            }
+        }
+        self.bolts.push(Bolt { segs, life, max_life: life });
+    }
+
     /// 快捷：圆点粒子
     #[allow(clippy::too_many_arguments)]
     pub fn dot(
@@ -225,6 +284,10 @@ impl Vfx {
     }
 
     pub fn update(&mut self, dt: f32) {
+        self.bolts.retain_mut(|b| {
+            b.life -= dt;
+            b.life > 0.0
+        });
         self.particles.retain_mut(|p| {
             p.life -= dt;
             if p.life <= 0.0 {
@@ -248,6 +311,32 @@ impl Vfx {
     }
 
     pub fn render(&self, batch: &mut SpriteBatch, white: &Region, cam_tl: Vec2, cam_br: Vec2) {
+        // ---- 闪电链：每段画两层旋转四边形（辉光层 + 白炽核心），亮度随寿命衰减 ----
+        for b in &self.bolts {
+            let k = (b.life / b.max_life).clamp(0.0, 1.0);
+            for &(a, p2, w) in &b.segs {
+                let mid = (a + p2) * 0.5;
+                let d = p2 - a;
+                let ang = d.y.atan2(d.x);
+                let len = d.length() + w; // 段间补 1px 重叠防断裂
+                // 辉光层（半透明宽）
+                batch.push(
+                    mid,
+                    Vec2::new(len, w * 3.4),
+                    ang,
+                    white,
+                    [0.55, 0.7, 1.0, 0.4 * k],
+                );
+                // 白炽核心（不透明窄）
+                batch.push(
+                    mid,
+                    Vec2::new(len, w),
+                    ang,
+                    white,
+                    [1.0, 1.0, 1.0, 0.95 * k],
+                );
+            }
+        }
         for p in &self.particles {
             if p.pos.x < cam_tl.x - 4.0 || p.pos.x > cam_br.x + 4.0 {
                 continue;
