@@ -109,9 +109,19 @@ pub fn tick(app: &mut GameApp, ctx: &mut EngineCtx) {
         None
     };
     let Some(i) = want else { return };
-    if app.skills.learned[i] == 0 {
-        app.hint =
-            (format!("尚未学习「{}」（按 K 打开技能面板，用技能点学习）", SKILLS[i].name), 2.0);
+    // 闪电术特殊：持有「闪电魔法书」（背包/已装备）即视为 Lv.1 可施放
+    let learned = if i == 3 {
+        app.skills.learned[3].max(if has_tome(app) { 1 } else { 0 })
+    } else {
+        app.skills.learned[i]
+    };
+    if learned == 0 {
+        if i == 3 {
+            app.hint = ("装备「闪电魔法书」或在技能面板 [K] 学习闪电术".to_string(), 2.0);
+        } else {
+            app.hint =
+                (format!("尚未学习「{}」（按 K 打开技能面板，用技能点学习）", SKILLS[i].name), 2.0);
+        }
         return;
     }
     if app.skills.cds[i] > 0.0 {
@@ -228,12 +238,22 @@ fn cast_heal(app: &mut GameApp) -> bool {
     true
 }
 
+/// 是否持有「闪电魔法书」（背包或任意装备位）
+fn has_tome(app: &GameApp) -> bool {
+    app.inv
+        .bag
+        .iter()
+        .chain(app.inv.equip.iter())
+        .any(|s| s.as_ref().map(|it| it.def == "tome_lightning").unwrap_or(false))
+}
+
 /// 闪电术：雷击离鼠标最近的敌人（施法距离内）；无敌人时轰击鼠标落点（小范围 AoE）
 fn cast_lightning(app: &mut GameApp, ctx: &mut EngineCtx) -> bool {
     const RANGE: f32 = 320.0; // 施法距离（玩家到落点）
     const AOE: f32 = 34.0; // 落点 AoE 半径
     let st = app.inv.aggregate(&app.db);
-    let lv = app.skills.learned[3] as f32;
+    // 有效等级：技能点学习等级 与 魔法书保底 Lv.1 取大
+    let lv = app.skills.learned[3].max(if has_tome(app) { 1 } else { 0 }) as f32;
     let dmg = st.damage(22.0 + 12.0 * (lv - 1.0));
 
     // ---- 选落点：距鼠标最近且在施法距离内的敌人；否则鼠标处（向玩家方向夹回 RANGE）----
@@ -337,8 +357,15 @@ pub fn draw_hud(app: &GameApp, ctx: &egui::Context) {
                 ui.set_min_width(120.0);
                 ui.label(format!("技能点 {}", app.skills.pts));
                 for (i, def) in SKILLS.iter().enumerate() {
-                    let lv = app.skills.learned[i];
-                    let (txt, color) = if lv == 0 {
+                    // 闪电术：持魔法书时未学习也显示可用（书授 Lv.1）
+                    let lv = if i == 3 {
+                        app.skills.learned[3].max(if has_tome(app) { 1 } else { 0 })
+                    } else {
+                        app.skills.learned[i]
+                    };
+                    let (txt, color) = if app.skills.learned[i] == 0 && lv > 0 {
+                        (format!("[{}] {} 书授Lv.1", def.key_hint, def.name), egui::Color32::from_rgb(120, 180, 255))
+                    } else if lv == 0 {
                         (format!("[{}] {} 未学习", def.key_hint, def.name), egui::Color32::GRAY)
                     } else {
                         let cd = app.skills.cd_remaining(i);
@@ -379,13 +406,27 @@ pub fn draw_window(app: &mut GameApp, ctx: &egui::Context) {
             }
             ui.separator();
             for (i, def) in SKILLS.iter().enumerate() {
-                let lv = app.skills.learned[i];
+                // 闪电术：持魔法书时未学习也按书授 Lv.1 展示
+                let tome_lv = i == 3 && app.skills.learned[3] == 0 && has_tome(app);
+                let lv = if i == 3 {
+                    app.skills.learned[3].max(if has_tome(app) { 1 } else { 0 })
+                } else {
+                    app.skills.learned[i]
+                };
                 ui.horizontal(|ui| {
                     ui.monospace(format!(
                         "[{}] {}{}",
                         def.key_hint,
                         def.name,
-                        if lv > 0 { format!(" Lv.{lv}") } else { String::new() }
+                        if lv > 0 {
+                            if tome_lv {
+                                " 书授Lv.1".to_string()
+                            } else {
+                                format!(" Lv.{lv}")
+                            }
+                        } else {
+                            String::new()
+                        }
                     ));
                     if lv == 0 {
                         ui.add_enabled_ui(app.skills.pts > 0, |ui| {
