@@ -86,7 +86,9 @@ pub enum EntSel {
 
 pub struct Ide {
     pub open: bool,
-    /// 中栏页：0 视口 / 1 文件
+    /// 顶部菜单栏激活功能：0 工程（视口/文件）/ 1 特效 / 2 动画 / 3 植被 / 4 人物 / 5 物品
+    pub func: usize,
+    /// 中栏页：0 视口 / 1 文件（仅工程功能内使用）
     pub tab: usize,
     /// 视口运行开关
     pub run: bool,
@@ -125,6 +127,7 @@ impl Default for Ide {
     fn default() -> Self {
         Self {
             open: false,
+            func: 0,
             tab: 0,
             run: true,
             sel: None,
@@ -233,6 +236,52 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
         None => "引擎 IDE — 内置资源".to_string(),
     };
 
+    // ---------------- 顶部传统菜单栏 ----------------
+    egui::TopBottomPanel::top("ide_menubar")
+        .frame(
+            egui::Frame::NONE
+                .fill(BG_BAR)
+                .stroke(Stroke::new(LINE_W, LINE))
+                .inner_margin(Margin::symmetric(6, 4)),
+        )
+        .show(ctx, |ui| {
+            set_font(ui, app.ide.font_size);
+            ui.spacing_mut().item_spacing.y = 0.0;
+            ui.horizontal(|ui| {
+                // 菜单项：工程(视口/文件) + 五大编辑器功能
+                const MENUS: [(&str, usize); 6] = [
+                    ("工程", 0),
+                    ("特效", 1),
+                    ("动画", 2),
+                    ("植被", 3),
+                    ("人物", 4),
+                    ("物品", 5),
+                ];
+                for (label, f) in MENUS {
+                    let active = app.ide.func == f;
+                    let txt = RichText::new(label).color(if active { ACCENT } else { DIM });
+                    if ui.button(txt).clicked() {
+                        app.ide.func = f;
+                    }
+                }
+                ui.separator();
+                // 编辑器功能激活时：与 F1 编辑器状态双向同步（热重载保护/表单状态沿用）
+                if app.ide.func >= 1 {
+                    app.editor.open = true;
+                    app.editor.tab = app.ide.func - 1;
+                    ui.with_layout(
+                        egui::Layout::right_to_left(egui::Align::Center),
+                        |ui| {
+                            ui.colored_label(ACCENT, "编辑器");
+                        },
+                    );
+                }
+            });
+        });
+
+    // 编辑器功能未激活时，编辑器视为关闭（热重载保护按工程功能放开）
+    app.editor.open = app.ide.open && app.ide.func >= 1;
+
     // ---------------- 左栏 ----------------
     egui::SidePanel::left("ide_left")
         .resizable(true)
@@ -258,6 +307,7 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
                     ui.label(RichText::new(&title).strong().color(ACCENT));
                 });
 
+            if app.ide.func == 0 {
             egui::ScrollArea::vertical()
                 .id_salt("ide_left_scroll")
                 .show(ui, |ui| {
@@ -382,7 +432,11 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
                         }
                     }
                 });
-            });
+                });
+            } else {
+                // 编辑器功能：左栏显示该功能的资源列表
+                crate::editor::draw_func_list(ui, app);
+            }
         });
 
     // ---------------- 右栏 ----------------
@@ -443,7 +497,7 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
 
     // ---------------- 中栏：视口 / 文件 ----------------
     egui::CentralPanel::default()
-        .frame(if app.ide.tab == 1 {
+        .frame(if app.ide.tab == 1 || app.ide.func != 0 {
             // 文件模式：整块不透明（避免透出游戏画面）
             egui::Frame::NONE.fill(BG_PANEL)
         } else {
@@ -455,6 +509,7 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
             // 工具条与内容区零间距堆叠（消除缝隙）
             ui.spacing_mut().item_spacing.y = 0.0;
             // 顶部工具条：直角、满宽、底部分隔线（圆角会在四角透出游戏画面）
+            if app.ide.func == 0 {
             egui::Frame::NONE
                 .fill(BG_BAR)
                 .stroke(Stroke::new(LINE_W, LINE))
@@ -529,6 +584,21 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
                         });
                     });
             });
+            } else {
+                // 编辑器功能区：中栏直接承载对应编辑器页（与 F1 编辑器内容一致）
+                egui::ScrollArea::vertical()
+                    .id_salt("ide_editor_scroll")
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        match app.ide.func {
+                            1 => crate::editor::tab_vfx(ui, app),
+                            2 => crate::editor::tab_anim(ui, app),
+                            3 => crate::editor::tab_veg(ui, app),
+                            4 => crate::editor::tab_char(ui, app),
+                            _ => crate::editor::tab_items(ui, app),
+                        }
+                    });
+            }
         });
 }
 

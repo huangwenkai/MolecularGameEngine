@@ -343,33 +343,90 @@ pub fn reload_if_changed(app: &mut GameApp) -> bool {
     mat_reloaded
 }
 
-/// egui 面板（App::render 中调用）：特效 / 动画 双页
-pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
-    if !app.editor.open {
-        return;
-    }
-    egui::Window::new("编辑器 (F1)")
-        .default_width(760.0)
-        .show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                ui.selectable_value(&mut app.editor.tab, 0, "特效");
-                ui.selectable_value(&mut app.editor.tab, 1, "动画");
-                ui.selectable_value(&mut app.editor.tab, 2, "植被");
-                ui.selectable_value(&mut app.editor.tab, 3, "人物");
-                ui.selectable_value(&mut app.editor.tab, 4, "物品");
-            });
-            ui.separator();
-            match app.editor.tab {
-                0 => tab_vfx(ui, app),
-                1 => tab_anim(ui, app),
-                2 => tab_veg(ui, app),
-                3 => tab_char(ui, app),
-                _ => tab_items(ui, app),
+/// 编辑器功能已并入 IDE（F4 → 菜单栏 特效/动画/植被/人物/物品）；
+/// F1 = 打开 IDE 并跳到编辑器功能区。
+
+/// IDE 左栏：按当前功能显示对应的资源选择列表
+pub fn draw_func_list(ui: &mut egui::Ui, app: &mut GameApp) {
+    ui.heading("资源列表");
+    ui.separator();
+    match app.ide.func {
+        1 => {
+            // 特效蓝图
+            let mut names: Vec<String> = app.vfx.bps.keys().cloned().collect();
+            names.sort();
+            for n in names {
+                if ui
+                    .selectable_label(app.editor.sel == n, &n)
+                    .clicked()
+                {
+                    app.editor.sel = n;
+                }
             }
-        });
+        }
+        2 => {
+            // 动画
+            let mut names: Vec<String> = app.anims.defs.keys().cloned().collect();
+            names.sort();
+            for n in names {
+                let cnt = app.anims.frame_count(&n);
+                if ui
+                    .selectable_label(app.editor.anim_sel == n, format!("{n} ({cnt}帧)"))
+                    .clicked()
+                {
+                    app.editor.anim_sel = n;
+                }
+            }
+        }
+        3 => {
+            // 植被
+            for (i, p) in app.veg.plants.iter().enumerate() {
+                if ui
+                    .selectable_label(app.editor.veg_sel == i, &p.name)
+                    .clicked()
+                {
+                    app.editor.veg_sel = i;
+                }
+            }
+        }
+        4 => {
+            // 人物部件
+            for (i, p) in crate::character::PARTS.iter().enumerate() {
+                if ui
+                    .selectable_label(app.editor.char_sel == i, p.label)
+                    .clicked()
+                {
+                    app.editor.char_sel = i;
+                }
+            }
+        }
+        _ => {
+            // 物品
+            let mut ids: Vec<String> = app.db.defs.keys().cloned().collect();
+            ids.sort();
+            egui::ScrollArea::vertical()
+                .id_salt("ide_func_items")
+                .max_height(430.0)
+                .show(ui, |ui| {
+                    for id in ids {
+                        let (name, cat) = {
+                            let d = &app.db.defs[&id];
+                            (d.name.clone(), d.category())
+                        };
+                        if ui
+                            .selectable_label(app.editor.item_sel == id, format!("{name} · {cat}"))
+                            .on_hover_text(format!("id: {id}"))
+                            .clicked()
+                        {
+                            app.editor.item_sel = id;
+                        }
+                    }
+                });
+        }
+    }
 }
 
-fn tab_vfx(ui: &mut egui::Ui, app: &mut GameApp) {
+pub fn tab_vfx(ui: &mut egui::Ui, app: &mut GameApp) {
             let mut do_save = false;
             let mut do_save_weapons = false;
 
@@ -563,7 +620,7 @@ fn emitter_ui(ui: &mut egui::Ui, em: &mut Emitter, idx: usize, del: &mut Option<
 }
 
 /// 动画编辑页：精灵表加载 / 帧时长 / 帧事件 / 预览 / 保存（全程不重启）
-fn tab_anim(ui: &mut egui::Ui, app: &mut GameApp) {
+pub fn tab_anim(ui: &mut egui::Ui, app: &mut GameApp) {
     let names: Vec<String> = app.anims.defs.keys().cloned().collect();
     if app.editor.anim_sel.is_empty() {
         app.editor.anim_sel = names.first().cloned().unwrap_or_default();
@@ -699,7 +756,7 @@ fn tab_anim(ui: &mut egui::Ui, app: &mut GameApp) {
 }
 
 /// 植被编辑页：增删改植被定义 / 重新生长 / 保存（全程不重启）
-fn tab_veg(ui: &mut egui::Ui, app: &mut GameApp) {
+pub fn tab_veg(ui: &mut egui::Ui, app: &mut GameApp) {
     let mat_names = app.world.mats.names();
     let n_plants = app.veg.plants.len();
 
@@ -868,7 +925,7 @@ fn tab_veg(ui: &mut egui::Ui, app: &mut GameApp) {
 }
 
 /// 人物形象编辑页：逐像素绘制部件贴图（实时生效，保存持久化）
-fn tab_char(ui: &mut egui::Ui, app: &mut GameApp) {
+pub fn tab_char(ui: &mut egui::Ui, app: &mut GameApp) {
     // 部件选择
     ui.horizontal(|ui| {
         for (i, def) in crate::character::PARTS.iter().enumerate() {
@@ -1061,7 +1118,7 @@ fn char_redo(app: &mut GameApp) {
 }
 
 /// 物品页：左侧物品列表 + 保存；右侧按类型展示不同配置参数（选中即显示）
-fn tab_items(ui: &mut egui::Ui, app: &mut GameApp) {
+pub fn tab_items(ui: &mut egui::Ui, app: &mut GameApp) {
     use crate::items::Slot;
     if app.editor.icon_path.is_empty() {
         // 预填上次的精灵图路径（首次使用可直接导入）

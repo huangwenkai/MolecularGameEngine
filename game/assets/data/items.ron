@@ -95,7 +95,7 @@
             name: "金币",
             slot: Trinket,
             stack: 999,
-            icon: None,
+            icon: Some("64x64_0130"),
             dmg: 0.0,
             armor: 0.0,
             speed: 1.0,
@@ -466,6 +466,59 @@
         ),
     ],
     tables: {
+        "elite_loot": [
+            (
+                item: "coin",
+                weight: 30,
+                min: 12,
+                max: 30,
+                chance: 1.0,
+            ),
+            (
+                item: "GEAR_RANDOM",
+                weight: 30,
+                min: 0,
+                max: 1,
+                chance: 1.0,
+            ),
+            (
+                item: "potion_hp",
+                weight: 12,
+                min: 1,
+                max: 2,
+                chance: 0.5,
+            ),
+        ],
+        "monster_loot": [
+            (
+                item: "coin",
+                weight: 40,
+                min: 2,
+                max: 8,
+                chance: 0.8,
+            ),
+            (
+                item: "GEAR_RANDOM",
+                weight: 14,
+                min: 0,
+                max: 1,
+                chance: 0.3,
+            ),
+            (
+                item: "potion_hp",
+                weight: 8,
+                min: 1,
+                max: 1,
+                chance: 0.15,
+            ),
+            (
+                item: "gel",
+                weight: 10,
+                min: 1,
+                max: 1,
+                chance: 0.25,
+            ),
+        ],
         "dummy_loot": [
             (
                 item: "coin",
@@ -503,29 +556,6 @@
                 chance: 0.18,
             ),
         ],
-        "elite_loot": [
-            (
-                item: "coin",
-                weight: 30,
-                min: 12,
-                max: 30,
-                chance: 1.0,
-            ),
-            (
-                item: "GEAR_RANDOM",
-                weight: 30,
-                min: 0,
-                max: 1,
-                chance: 1.0,
-            ),
-            (
-                item: "potion_hp",
-                weight: 12,
-                min: 1,
-                max: 2,
-                chance: 0.5,
-            ),
-        ],
         "boss_loot": [
             (
                 item: "coin",
@@ -547,36 +577,6 @@
                 min: 2,
                 max: 4,
                 chance: 1.0,
-            ),
-        ],
-        "monster_loot": [
-            (
-                item: "coin",
-                weight: 40,
-                min: 2,
-                max: 8,
-                chance: 0.8,
-            ),
-            (
-                item: "GEAR_RANDOM",
-                weight: 14,
-                min: 0,
-                max: 1,
-                chance: 0.3,
-            ),
-            (
-                item: "potion_hp",
-                weight: 8,
-                min: 1,
-                max: 1,
-                chance: 0.15,
-            ),
-            (
-                item: "gel",
-                weight: 10,
-                min: 1,
-                max: 1,
-                chance: 0.25,
             ),
         ],
     },

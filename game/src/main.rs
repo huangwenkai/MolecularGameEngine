@@ -304,6 +304,96 @@ impl GameApp {
                 }
             }
         }
+        // 动画/物品编辑器数据服务（IDE 暂停模式下也要响应编辑器请求）
+        self.editor_data_services(ctx);
+    }
+
+    /// 编辑器数据服务：动画精灵表导入、图标精灵图导入/选用（需要 renderer；普通 tick 与 ide_tick 共用）
+    fn editor_data_services(&mut self, ctx: &mut EngineCtx) {
+        // ---- 动画编辑器：加载/重切精灵表 ----
+        if self.editor.anim_load_req {
+            self.editor.anim_load_req = false;
+            self.editor.anim_err = None;
+            if let Some(def) = self.anims.defs.get(&self.editor.anim_sel).cloned() {
+                match anim::load_sheet_frames(&def) {
+                    Ok(frames) => {
+                        let n = frames.len();
+                        if let Some(d) = self.anims.defs.get_mut(&self.editor.anim_sel) {
+                            d.frame_times = vec![0.12; n];
+                        }
+                        match self
+                            .anims
+                            .register_runtime(def, &frames, ctx.renderer)
+                        {
+                            Ok(_) => {
+                                tracing::info!("动画 {} 加载完成（{n} 帧）", self.editor.anim_sel)
+                            }
+                            Err(e) => self.editor.anim_err = Some(e),
+                        }
+                    }
+                    Err(e) => self.editor.anim_err = Some(e),
+                }
+            }
+        }
+        // ---- 物品编辑器：导入图标精灵图（切 64×64 帧，缓存像素供选择器预览）----
+        if self.editor.icon_import_req {
+            self.editor.icon_import_req = false;
+            self.editor.item_err = None;
+            let path = self.editor.icon_path.trim().to_string();
+            match image::open(&path).map(|i| i.to_rgba8()) {
+                Ok(img) => {
+                    let (w, h) = img.dimensions();
+                    let (cx, cy) = (w / 64, h / 64);
+                    if cx == 0 || cy == 0 {
+                        self.editor.item_err = Some("图太小（需 ≥64×64）".into());
+                    } else {
+                        let sheet: Vec<image::RgbaImage> = (0..cx * cy)
+                            .map(|i| {
+                                image::imageops::crop_imm(
+                                    &img,
+                                    (i % cx) * 64,
+                                    (i / cx) * 64,
+                                    64,
+                                    64,
+                                )
+                                .to_image()
+                            })
+                            .collect();
+                        let n = sheet.len();
+                        for (i, f) in sheet.iter().enumerate() {
+                            self.icons
+                                .store_pixels(&icons::IconBank::sheet_key(i), f.clone());
+                        }
+                        self.editor.icon_sheet = sheet;
+                        tracing::info!("图标精灵图导入：{n} 帧（{path}）");
+                    }
+                }
+                Err(e) => self.editor.item_err = Some(format!("读取失败: {e}")),
+            }
+        }
+        // ---- 物品编辑器：选用第 N 帧为当前物品图标（存 PNG + 上传图集）----
+        if let Some(i) = self.editor.icon_pick.take() {
+            let sel = self.editor.item_sel.clone();
+            if let Some(f) = self.editor.icon_sheet.get(i).cloned() {
+                let stem = std::path::Path::new(self.editor.icon_path.trim())
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("icons")
+                    .to_string();
+                let key = format!("{stem}_{i:04}");
+                let dir = project::dir_of("icons");
+                let _ = std::fs::create_dir_all(&dir);
+                if f.save(dir.join(format!("{key}.png"))).is_ok() {
+                    self.icons.register(ctx.renderer, &key, f);
+                    if let Some(d) = self.db.defs.get_mut(&sel) {
+                        d.icon = Some(key.clone());
+                    }
+                    tracing::info!("物品 {sel} 图标 → {key}");
+                } else {
+                    self.editor.item_err = Some("图标 PNG 保存失败".into());
+                }
+            }
+        }
     }
 
 }
@@ -421,9 +511,17 @@ impl App for GameApp {
         if ctx.input.just_pressed(Action::ToggleEditor) {
             self.editor.open = !self.editor.open;
         }
+        // ---- F1：打开 IDE 并跳到编辑器功能区（编辑器已并入 IDE）----
+        if ctx.input.just_pressed(Action::ToggleEditor) {
+            self.ide.open = true;
+            self.ide.func = (self.editor.tab + 1).clamp(1, 5);
+        }
         // ---- 引擎 IDE（F4）：打开时暂停游戏逻辑，仅 IDE 面板响应 ----
         if ctx.input.just_pressed(Action::ToggleIde) {
             self.ide.open = !self.ide.open;
+        }
+        if !self.ide.open {
+            self.editor.open = false; // IDE 关闭后放开编辑器热重载保护
         }
         if self.ide.open {
             // IDE 模式：视口实时预览——run=true 时推进世界/AI（不读玩家输入），否则冻结画面
@@ -493,91 +591,8 @@ impl App for GameApp {
             }
         }
 
-        // ---- 动画编辑器：加载/重切精灵表（需要 renderer 上传图集）----
-        if self.editor.anim_load_req {
-            self.editor.anim_load_req = false;
-            self.editor.anim_err = None;
-            if let Some(def) = self.anims.defs.get(&self.editor.anim_sel).cloned() {
-                match anim::load_sheet_frames(&def) {
-                    Ok(frames) => {
-                        let n = frames.len();
-                        if let Some(d) = self.anims.defs.get_mut(&self.editor.anim_sel) {
-                            d.frame_times = vec![0.12; n];
-                        }
-                        match self
-                            .anims
-                            .register_runtime(def, &frames, ctx.renderer)
-                        {
-                            Ok(_) => {
-                                tracing::info!("动画 {} 加载完成（{n} 帧）", self.editor.anim_sel)
-                            }
-                            Err(e) => self.editor.anim_err = Some(e),
-                        }
-                    }
-                    Err(e) => self.editor.anim_err = Some(e),
-                }
-            }
-        }
-
-        // ---- 物品编辑器：导入图标精灵图（切 64×64 帧，缓存像素供选择器预览）----
-        if self.editor.icon_import_req {
-            self.editor.icon_import_req = false;
-            self.editor.item_err = None;
-            let path = self.editor.icon_path.trim().to_string();
-            match image::open(&path).map(|i| i.to_rgba8()) {
-                Ok(img) => {
-                    let (w, h) = img.dimensions();
-                    let (cx, cy) = (w / 64, h / 64);
-                    if cx == 0 || cy == 0 {
-                        self.editor.item_err = Some("图太小（需 ≥64×64）".into());
-                    } else {
-                        let sheet: Vec<image::RgbaImage> = (0..cx * cy)
-                            .map(|i| {
-                                image::imageops::crop_imm(
-                                    &img,
-                                    (i % cx) * 64,
-                                    (i / cx) * 64,
-                                    64,
-                                    64,
-                                )
-                                .to_image()
-                            })
-                            .collect();
-                        let n = sheet.len();
-                        for (i, f) in sheet.iter().enumerate() {
-                            self.icons
-                                .store_pixels(&icons::IconBank::sheet_key(i), f.clone());
-                        }
-                        self.editor.icon_sheet = sheet;
-                        tracing::info!("图标精灵图导入：{n} 帧（{path}）");
-                    }
-                }
-                Err(e) => self.editor.item_err = Some(format!("读取失败: {e}")),
-            }
-        }
-        // ---- 物品编辑器：选用第 N 帧为当前物品图标（存 PNG + 上传图集）----
-        if let Some(i) = self.editor.icon_pick.take() {
-            let sel = self.editor.item_sel.clone();
-            if let Some(f) = self.editor.icon_sheet.get(i).cloned() {
-                let stem = std::path::Path::new(self.editor.icon_path.trim())
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("icons")
-                    .to_string();
-                let key = format!("{stem}_{i:04}");
-                let dir = project::dir_of("icons");
-                let _ = std::fs::create_dir_all(&dir);
-                if f.save(dir.join(format!("{key}.png"))).is_ok() {
-                    self.icons.register(ctx.renderer, &key, f);
-                    if let Some(d) = self.db.defs.get_mut(&sel) {
-                        d.icon = Some(key.clone());
-                    }
-                    tracing::info!("物品 {sel} 图标 → {key}");
-                } else {
-                    self.editor.item_err = Some("图标 PNG 保存失败".into());
-                }
-            }
-        }
+        // ---- 动画/物品编辑器数据服务（动画精灵表导入、图标导入/选用）----
+        self.editor_data_services(ctx);
 
         // ---- 动画预览（玩家头顶循环播放，帧事件输出日志）----
         if let Some(pl) = &mut self.anim_preview {
@@ -1037,7 +1052,6 @@ impl App for GameApp {
                 ide::draw(self, egui);
             } else {
                 self.monsters.draw_boss_bar(egui);
-                editor::draw(self, egui);
                 inventory::draw(self, egui);
                 skills::draw_window(self, egui);
                 skills::draw_hud(self, egui);
