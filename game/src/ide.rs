@@ -1,10 +1,11 @@
-//! 引擎 IDE（F4）：左中右三栏 —— 左=工程+素材树+场景树，中=视口/文件编辑，右=检查器
+//! 引擎 IDE（F4/F1）：**插件化工作台**。
 //!
-//! UI 约定：所有模块统一用 `section()` 可折叠区块（状态存在 Ide 里），配色与图标保持一致。
-//! - 中栏「视口」：面板透明，直接透出实时游戏画面（可运行/暂停）
-//! - 左栏「场景树」：玩家 / 怪物 / 居民 / 训练假人，可点选
-//! - 右栏「检查器」：选中实体显示组件属性；选中文件显示文件属性与操作
-//! - 素材工具：精灵表导入向导（PNG → 切帧 → 写入 animations.ron）、工程导出副本
+//! 本文件只是 UI 壳：顶部菜单栏（由插件列表驱动）+ 左/中/右三栏分发。
+//! 每个功能是一个插件（见 `plugins.rs` 的 `IdePlugin`），实现自己的左/中/右面板；
+//! 改 UI 展示只动插件实现，游戏功能（编辑器数据服务、热重载等在 main.rs）不受影响。
+//!
+//! - 工程插件：左=工程/素材树/场景树，中=视口/文件编辑，右=检查器
+//! - 编辑器插件（特效/动画/植被/人物/物品）：左=资源列表，中=编辑器页（不透明）
 use crate::project;
 use crate::GameApp;
 use egui::{Color32, Margin, RichText, Stroke};
@@ -54,7 +55,7 @@ impl IdeConfig {
 }
 
 /// 把当前 Ui（及其子 Ui）的全部文本样式字号统一设为 size
-fn set_font(ui: &mut egui::Ui, size: f32) {
+pub(crate) fn set_font(ui: &mut egui::Ui, size: f32) {
     let s = ui.style_mut();
     for (_kind, fid) in s.text_styles.iter_mut() {
         fid.size = size;
@@ -64,16 +65,16 @@ fn set_font(ui: &mut egui::Ui, size: f32) {
 // ---------------------------------------------------------------------------
 // 主题色（IDE 统一配色）
 // ---------------------------------------------------------------------------
-const BG_PANEL: Color32 = Color32::from_rgb(26, 27, 32);
-const BG_SECTION: Color32 = Color32::from_rgb(32, 33, 40);
-const BG_BAR: Color32 = Color32::from_rgb(22, 23, 28);
-const LINE: Color32 = Color32::from_rgb(52, 54, 66);
-const LINE_W: f32 = 1.0;
-const ACCENT: Color32 = Color32::from_rgb(96, 165, 250);
-const OK: Color32 = Color32::from_rgb(134, 220, 160);
-const WARN: Color32 = Color32::from_rgb(240, 200, 90);
-const ERR: Color32 = Color32::from_rgb(232, 118, 100);
-const DIM: Color32 = Color32::from_rgb(150, 154, 168);
+pub(crate) const BG_PANEL: Color32 = Color32::from_rgb(26, 27, 32);
+pub(crate) const BG_SECTION: Color32 = Color32::from_rgb(32, 33, 40);
+pub(crate) const BG_BAR: Color32 = Color32::from_rgb(22, 23, 28);
+pub(crate) const LINE: Color32 = Color32::from_rgb(52, 54, 66);
+pub(crate) const LINE_W: f32 = 1.0;
+pub(crate) const ACCENT: Color32 = Color32::from_rgb(96, 165, 250);
+pub(crate) const OK: Color32 = Color32::from_rgb(134, 220, 160);
+pub(crate) const WARN: Color32 = Color32::from_rgb(240, 200, 90);
+pub(crate) const ERR: Color32 = Color32::from_rgb(232, 118, 100);
+pub(crate) const DIM: Color32 = Color32::from_rgb(150, 154, 168);
 
 /// 场景树中的可选实体
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -86,9 +87,9 @@ pub enum EntSel {
 
 pub struct Ide {
     pub open: bool,
-    /// 顶部菜单栏激活功能：0 工程（视口/文件）/ 1 特效 / 2 动画 / 3 植被 / 4 人物 / 5 物品
+    /// 顶部菜单栏激活功能 = 插件下标（顺序见 plugins::all_plugins）
     pub func: usize,
-    /// 中栏页：0 视口 / 1 文件（仅工程功能内使用）
+    /// 中栏页：0 视口 / 1 文件（仅工程插件内使用）
     pub tab: usize,
     /// 视口运行开关
     pub run: bool,
@@ -157,17 +158,15 @@ impl Default for Ide {
     }
 }
 
-
-
-fn is_text(p: &PathBuf) -> bool {
+pub(crate) fn is_text(p: &PathBuf) -> bool {
     matches!(
         p.extension().and_then(|e| e.to_str()),
         Some("ron") | Some("wgsl") | Some("txt") | Some("md")
     )
 }
 
-/// 可折叠区块：圆角卡片 + 三角图标 + 标题，展开时展示内容
-fn section(
+/// 可折叠区块：直角卡片 + 三角图标 + 标题，展开时展示内容
+pub(crate) fn section(
     ui: &mut egui::Ui,
     title: &str,
     open: &mut bool,
@@ -207,7 +206,7 @@ fn section(
 }
 
 /// 属性行：左键名（弱化）右键值（等宽）
-fn prop(ui: &mut egui::Ui, k: &str, v: impl Into<String>) {
+pub(crate) fn prop(ui: &mut egui::Ui, k: &str, v: impl Into<String>) {
     ui.horizontal(|ui| {
         ui.weak(k);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -217,7 +216,7 @@ fn prop(ui: &mut egui::Ui, k: &str, v: impl Into<String>) {
 }
 
 /// 分组标题（树内小节）
-fn group(ui: &mut egui::Ui, name: &str, count: usize) {
+pub(crate) fn group(ui: &mut egui::Ui, name: &str, count: usize) {
     ui.horizontal(|ui| {
         ui.weak(name);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -226,17 +225,20 @@ fn group(ui: &mut egui::Ui, name: &str, count: usize) {
     });
 }
 
+/// IDE 主入口：菜单栏 + 三栏分发（全部交给激活插件）
 pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
     if !app.ide.open {
         return;
     }
+    let plugins = crate::plugins::all_plugins();
+    let idx = app.ide.func.min(plugins.len() - 1);
     let proj = app.project.current.as_ref().map(|p| p.name.clone());
     let title = match &proj {
-        Some(n) => format!("引擎 IDE — 工程「{n}」"),
-        None => "引擎 IDE — 内置资源".to_string(),
+        Some(n) => format!("{} — 工程「{n}」", plugins[idx].title()),
+        None => format!("{} — 内置资源", plugins[idx].title()),
     };
 
-    // ---------------- 顶部传统菜单栏 ----------------
+    // ---------------- 顶部传统菜单栏（插件驱动）----------------
     egui::TopBottomPanel::top("ide_menubar")
         .frame(
             egui::Frame::NONE
@@ -248,39 +250,24 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
             set_font(ui, app.ide.font_size);
             ui.spacing_mut().item_spacing.y = 0.0;
             ui.horizontal(|ui| {
-                // 菜单项：工程(视口/文件) + 五大编辑器功能
-                const MENUS: [(&str, usize); 6] = [
-                    ("工程", 0),
-                    ("特效", 1),
-                    ("动画", 2),
-                    ("植被", 3),
-                    ("人物", 4),
-                    ("物品", 5),
-                ];
-                for (label, f) in MENUS {
-                    let active = app.ide.func == f;
-                    let txt = RichText::new(label).color(if active { ACCENT } else { DIM });
-                    if ui.button(txt).clicked() {
-                        app.ide.func = f;
+                for (i, p) in plugins.iter().enumerate() {
+                    let active = i == idx;
+                    if ui
+                        .button(RichText::new(p.label()).color(if active { ACCENT } else { DIM }))
+                        .clicked()
+                    {
+                        app.ide.func = i;
                     }
                 }
-                ui.separator();
-                // 编辑器功能激活时：与 F1 编辑器状态双向同步（热重载保护/表单状态沿用）
-                if app.ide.func >= 1 {
-                    app.editor.open = true;
-                    app.editor.tab = app.ide.func - 1;
-                    ui.with_layout(
-                        egui::Layout::right_to_left(egui::Align::Center),
-                        |ui| {
-                            ui.colored_label(ACCENT, "编辑器");
-                        },
-                    );
-                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.weak(proj.clone().unwrap_or_else(|| "内置资源".into()));
+                });
             });
         });
 
-    // 编辑器功能未激活时，编辑器视为关闭（热重载保护按工程功能放开）
-    app.editor.open = app.ide.open && app.ide.func >= 1;
+    // ---------------- 激活插件（每帧回调：状态同步等）----------------
+    let active = &*plugins[idx];
+    active.on_active_frame(app);
 
     // ---------------- 左栏 ----------------
     egui::SidePanel::left("ide_left")
@@ -293,11 +280,8 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
                 .inner_margin(Margin::ZERO),
         )
         .show(ctx, |ui| {
-            // IDE 统一字号（配置可调，默认 13px）
             set_font(ui, app.ide.font_size);
-            // 模块之间零间距（标题栏与区块紧贴）
             ui.spacing_mut().item_spacing.y = 0.0;
-            // 标题栏（直角满宽）
             egui::Frame::NONE
                 .fill(BG_BAR)
                 .stroke(Stroke::new(LINE_W, LINE))
@@ -306,305 +290,65 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
                     ui.set_min_width(ui.available_width());
                     ui.label(RichText::new(&title).strong().color(ACCENT));
                 });
-
-            if app.ide.func == 0 {
             egui::ScrollArea::vertical()
                 .id_salt("ide_left_scroll")
                 .show(ui, |ui| {
-                // ---- 工程 ----
-                section(ui, "工程", &mut app.ide.sec_proj, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label("新建");
-                        ui.text_edit_singleline(&mut app.project.new_name);
-                        if ui.button("创建").clicked() {
-                            let name = app.project.new_name.clone();
-                            app.project.create(&name);
-                            app.project.new_name.clear();
-                        }
-                    });
-                    ui.horizontal(|ui| {
-                        ui.label("切换");
-                        egui::ComboBox::from_id_salt("ide_proj_combo")
-                            .width(ui.available_width() - 8.0)
-                            .selected_text(proj.clone().unwrap_or_else(|| "内置资源".into()))
-                            .show_ui(ui, |ui| {
-                                if ui
-                                    .selectable_label(
-                                        app.project.current.is_none(),
-                                        "内置资源（关闭工程）",
-                                    )
-                                    .clicked()
-                                {
-                                    app.project.close();
-                                }
-                                for name in project::list_projects() {
-                                    let cur = proj.as_deref() == Some(name.as_str());
-                                    if ui.selectable_label(cur, &name).clicked() {
-                                        app.project.open(&name);
-                                    }
-                                }
-                            });
-                    });
-                    if let Some(msg) = &app.project.msg {
-                        ui.colored_label(OK, msg);
-                    }
-                    ui.weak(
-                        app.project
-                            .current
-                            .as_ref()
-                            .map(|p| p.root.display().to_string())
-                            .unwrap_or_else(|| "内置 assets/".to_string()),
-                    );
+                    active.left_panel(ui, app);
                 });
-
-                // ---- 素材树 ----
-                section(ui, "素材", &mut app.ide.sec_assets, |ui| {
-                    for (kind, (label, _d, _e)) in project::GROUPS.iter().enumerate() {
-                        let files = project::list_group(kind);
-                        egui::CollapsingHeader::new(format!("{} ({})", label, files.len()))
-                        .id_salt(format!("ide_assets_group_{kind}"))
-                        .default_open(kind == 0)
-                        .show(ui, |ui| {
-                            for p in files {
-                                let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("?");
-                                let sel = app.ide.sel.as_deref() == Some(p.as_path());
-                                if ui.selectable_label(sel, name).clicked() {
-                                    app.ide.sel = Some(p.clone());
-                                    app.ide.text_of = None;
-                                    app.ide.dirty = false;
-                                    app.ide.confirm_del = false;
-                                    app.ide.ent = None;
-                                    app.ide.tab = 1;
-                                }
-                            }
-                        });
-                    }
-                });
-
-                // ---- 场景树 ----
-                section(ui, "场景", &mut app.ide.sec_scene, |ui| {
-                    group(ui, "玩家", 1);
-                    if ui
-                        .selectable_label(app.ide.ent == Some(EntSel::Player), "玩家")
-                        .clicked()
-                    {
-                        app.ide.ent = Some(EntSel::Player);
-                        app.ide.sel = None;
-                    }
-                    group(ui, "怪物", app.monsters.list.len());
-                    for i in 0..app.monsters.list.len() {
-                        let m = &app.monsters.list[i];
-                        let label = format!("{}  生命 {:.0}", m.kind.name(), m.hp);
-                        if ui
-                            .selectable_label(app.ide.ent == Some(EntSel::Monster(i)), label)
-                            .clicked()
-                        {
-                            app.ide.ent = Some(EntSel::Monster(i));
-                            app.ide.sel = None;
-                        }
-                    }
-                    group(ui, "居民", app.npcs.list.len());
-                    for i in 0..app.npcs.list.len() {
-                        let n = &app.npcs.list[i];
-                        let label = format!("居民 {}  {}", i, n.state.name());
-                        if ui
-                            .selectable_label(app.ide.ent == Some(EntSel::Npc(i)), label)
-                            .clicked()
-                        {
-                            app.ide.ent = Some(EntSel::Npc(i));
-                            app.ide.sel = None;
-                        }
-                    }
-                    let mut q =
-                        app.ecs.query::<(&crate::entities::Transform, &crate::entities::Dummy)>();
-                    let dummies: Vec<(hecs::Entity, glam::Vec2, f32)> =
-                        q.iter().map(|(e, (tr, d))| (e, tr.pos, d.hp)).collect();
-                    drop(q);
-                    group(ui, "假人", dummies.len());
-                    for (e, pos, hp) in dummies {
-                        let label = format!("假人 ({:.0},{:.0}) 生命 {:.0}", pos.x, pos.y, hp);
-                        if ui
-                            .selectable_label(app.ide.ent == Some(EntSel::Dummy(e)), label)
-                            .clicked()
-                        {
-                            app.ide.ent = Some(EntSel::Dummy(e));
-                            app.ide.sel = None;
-                        }
-                    }
-                });
-                });
-            } else {
-                // 编辑器功能：左栏显示该功能的资源列表
-                crate::editor::draw_func_list(ui, app);
-            }
         });
 
-    // ---------------- 右栏 ----------------
-    egui::SidePanel::right("ide_right")
-        .resizable(true)
-        .default_width(260.0)
-        .frame(
-            egui::Frame::NONE
-                .fill(BG_PANEL)
-                .stroke(Stroke::new(LINE_W, LINE))
-                .inner_margin(Margin::ZERO),
-        )
-        .show(ctx, |ui| {
-            set_font(ui, app.ide.font_size);
-            ui.spacing_mut().item_spacing.y = 0.0;
-            egui::Frame::NONE
-                .fill(BG_BAR)
-                .stroke(Stroke::new(LINE_W, LINE))
-                .inner_margin(Margin::symmetric(6, 5))
-                .show(ui, |ui| {
-                    ui.set_min_width(ui.available_width());
-                    ui.label(RichText::new("检查器 Inspector").strong().color(ACCENT));
-                });
-            egui::ScrollArea::vertical()
-                .id_salt("ide_right_scroll")
-                .show(ui, |ui| {
-                // ---- 实体属性 ----
-                let mut open = app.ide.sec_ent;
-                section(ui, "实体属性", &mut open, |ui| {
-                    match app.ide.ent {
-                        None => {
-                            ui.weak("未选中实体（左侧场景树点选）");
-                        }
-                        Some(e) => draw_entity_props(ui, app, e),
-                    }
-                });
-                app.ide.sec_ent = open;
-                // ---- 文件 ----
-                let mut open = app.ide.sec_file;
-                section(ui, "文件", &mut open, |ui| {
-                    draw_file_props(ui, app);
-                });
-                app.ide.sec_file = open;
-                // ---- 素材工具 ----
-                let mut open = app.ide.sec_tools;
-                section(ui, "素材工具", &mut open, |ui| {
-                    draw_asset_tools(ui, app);
-                });
-                app.ide.sec_tools = open;
-                // ---- IDE 配置 ----
-                let mut open = app.ide.sec_cfg;
-                section(ui, "配置", &mut open, |ui| {
-                    draw_ide_config(ui, app);
-                });
-                app.ide.sec_cfg = open;
-            });
-        });
-
-    // ---------------- 中栏：视口 / 文件 ----------------
-    egui::CentralPanel::default()
-        .frame(if app.ide.tab == 1 || app.ide.func != 0 {
-            // 文件模式：整块不透明（避免透出游戏画面）
-            egui::Frame::NONE.fill(BG_PANEL)
-        } else {
-            // 视口模式：透明，直接透出实时游戏画面
-            egui::Frame::NONE.fill(Color32::TRANSPARENT)
-        })
-        .show(ctx, |ui| {
-            set_font(ui, app.ide.font_size);
-            // 工具条与内容区零间距堆叠（消除缝隙）
-            ui.spacing_mut().item_spacing.y = 0.0;
-            // 顶部工具条：直角、满宽、底部分隔线（圆角会在四角透出游戏画面）
-            if app.ide.func == 0 {
-            egui::Frame::NONE
-                .fill(BG_BAR)
-                .stroke(Stroke::new(LINE_W, LINE))
-                .inner_margin(Margin::symmetric(6, 5))
-                .show(ui, |ui| {
-                    ui.set_min_width(ui.available_width());
-                    ui.horizontal(|ui| {
-                        let t0 = if app.ide.tab == 0 { ACCENT } else { DIM };
-                        let t1 = if app.ide.tab == 1 { ACCENT } else { DIM };
-                        if ui.button(RichText::new("视口").color(t0)).clicked() {
-                            app.ide.tab = 0;
-                        }
-                        if ui.button(RichText::new("文件").color(t1)).clicked() {
-                            app.ide.tab = 1;
-                        }
-                        ui.separator();
-                        if app.ide.tab == 0 {
-                            let (txt, col) = if app.ide.run {
-                                ("暂停", WARN)
-                            } else {
-                                ("运行", OK)
-                            };
-                            if ui.button(RichText::new(txt).color(col)).clicked() {
-                                app.ide.run = !app.ide.run;
-                            }
-                            ui.label("昼夜");
-                            ui.add(
-                                egui::Slider::new(&mut app.world.time, 0.0..=1.0)
-                                    .show_value(false),
-                            );
-                            ui.monospace(format!("{:.2}", app.world.time));
-                        }
-                        ui.with_layout(
-                            egui::Layout::right_to_left(egui::Align::Center),
-                            |ui| {
-                                let st = if app.ide.run { "运行中" } else { "已暂停" };
-                                ui.colored_label(
-                                    if app.ide.run { OK } else { WARN },
-                                    format!("{st}"),
-                                );
-                                ui.weak(proj.clone().unwrap_or_else(|| "内置资源".into()));
-                            },
-                        );
-                    });
-                });
-
-            if app.ide.tab == 1 {
-                // 文件区紧接工具条（无间距、直角、不透明）
+    // ---------------- 右栏（插件可选）----------------
+    if active.has_right() {
+        egui::SidePanel::right("ide_right")
+            .resizable(true)
+            .default_width(260.0)
+            .frame(
                 egui::Frame::NONE
                     .fill(BG_PANEL)
-                    .inner_margin(Margin::same(6))
-                    .show(ui, |ui| {
-                        ui.set_min_width(ui.available_width());
-                        draw_file_view(ui, app);
-                    });
-            }
-
-            // 底部状态栏（直角满宽，无圆角透视）
-            ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
+                    .stroke(Stroke::new(LINE_W, LINE))
+                    .inner_margin(Margin::ZERO),
+            )
+            .show(ctx, |ui| {
+                set_font(ui, app.ide.font_size);
+                ui.spacing_mut().item_spacing.y = 0.0;
                 egui::Frame::NONE
                     .fill(BG_BAR)
                     .stroke(Stroke::new(LINE_W, LINE))
                     .inner_margin(Margin::symmetric(6, 5))
                     .show(ui, |ui| {
                         ui.set_min_width(ui.available_width());
-                        ui.horizontal(|ui| {
-                            ui.weak(if app.ide.tab == 0 {
-                                "视口显示实时游戏画面（可暂停/运行，拖昼夜滑块看光照）"
-                            } else {
-                                "文件编辑：Ctrl+S 保存，保存后热重载立即生效"
-                            });
-                        });
+                        ui.label(RichText::new("检查器 Inspector").strong().color(ACCENT));
+                    });
+                egui::ScrollArea::vertical()
+                    .id_salt("ide_right_scroll")
+                    .show(ui, |ui| {
+                        active.right_panel(ui, app);
                     });
             });
-            } else {
-                // 编辑器功能区：中栏直接承载对应编辑器页（与 F1 编辑器内容一致）
-                egui::ScrollArea::vertical()
-                    .id_salt("ide_editor_scroll")
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        match app.ide.func {
-                            1 => crate::editor::tab_vfx(ui, app),
-                            2 => crate::editor::tab_anim(ui, app),
-                            3 => crate::editor::tab_veg(ui, app),
-                            4 => crate::editor::tab_char(ui, app),
-                            _ => crate::editor::tab_items(ui, app),
-                        }
-                    });
-            }
+    }
+
+    // ---------------- 中栏 ----------------
+    let opaque = active.wants_opaque(app);
+    egui::CentralPanel::default()
+        .frame(if opaque {
+            // 不透明：编辑器/文件模式（避免透出游戏画面）
+            egui::Frame::NONE.fill(BG_PANEL)
+        } else {
+            // 透明：直接透出实时游戏画面
+            egui::Frame::NONE.fill(Color32::TRANSPARENT)
+        })
+        .show(ctx, |ui| {
+            set_font(ui, app.ide.font_size);
+            ui.spacing_mut().item_spacing.y = 0.0;
+            active.central_panel(ui, app);
         });
 }
 
 // ---------------------------------------------------------------------------
+// 以下为插件使用的渲染实现（由 plugins.rs 的插件调用）
+// ---------------------------------------------------------------------------
 
-fn draw_entity_props(ui: &mut egui::Ui, app: &mut GameApp, ent: EntSel) {
+pub(crate) fn draw_entity_props(ui: &mut egui::Ui, app: &mut GameApp, ent: EntSel) {
     match ent {
         EntSel::Player => {
             let p = &app.player;
@@ -661,7 +405,7 @@ fn draw_entity_props(ui: &mut egui::Ui, app: &mut GameApp, ent: EntSel) {
     }
 }
 
-fn draw_file_props(ui: &mut egui::Ui, app: &mut GameApp) {
+pub(crate) fn draw_file_props(ui: &mut egui::Ui, app: &mut GameApp) {
     let Some(sel) = app.ide.sel.clone() else {
         ui.weak("未选中文件（左侧素材树点选）");
         return;
@@ -742,7 +486,7 @@ fn draw_file_props(ui: &mut egui::Ui, app: &mut GameApp) {
 }
 
 /// IDE 配置面板：界面字号（默认 13px，持久化到 saves/ide_config.ron）
-fn draw_ide_config(ui: &mut egui::Ui, app: &mut GameApp) {
+pub(crate) fn draw_ide_config(ui: &mut egui::Ui, app: &mut GameApp) {
     ui.horizontal(|ui| {
         ui.label("界面字号");
         let r = ui.add(
@@ -761,7 +505,7 @@ fn draw_ide_config(ui: &mut egui::Ui, app: &mut GameApp) {
     ui.weak("字号对整个 IDE 界面生效，保存在 saves/ide_config.ron");
 }
 
-fn draw_asset_tools(ui: &mut egui::Ui, app: &mut GameApp) {
+pub(crate) fn draw_asset_tools(ui: &mut egui::Ui, app: &mut GameApp) {
     egui::CollapsingHeader::new("导入精灵表")
         .id_salt("ide_import_sheet")
         .default_open(false)
@@ -873,7 +617,7 @@ fn copy_dir(src: &std::path::Path, dst: &std::path::Path) -> Result<usize, Strin
 
 // ---------------------------------------------------------------------------
 
-fn draw_file_view(ui: &mut egui::Ui, app: &mut GameApp) {
+pub(crate) fn draw_file_view(ui: &mut egui::Ui, app: &mut GameApp) {
     let Some(sel) = app.ide.sel.clone() else {
         ui.centered_and_justified(|ui| {
             ui.heading("从左侧素材树选择文件");
@@ -949,7 +693,9 @@ fn draw_file_view(ui: &mut egui::Ui, app: &mut GameApp) {
                     }
                 }
             }
-            Err(e) => { ui.colored_label(ERR, format!("无法读取: {e}")); }
+            Err(e) => {
+                ui.colored_label(ERR, format!("无法读取: {e}"));
+            }
         }
     } else {
         ui.weak("不支持预览的文件类型");

@@ -21,6 +21,7 @@ mod save;
 mod selftest;
 mod settings;
 mod icons;
+mod plugins;
 mod skills;
 mod tools;
 mod vfx;
