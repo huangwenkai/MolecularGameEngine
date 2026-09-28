@@ -1111,9 +1111,13 @@ pub fn tab_items(ui: &mut egui::Ui, app: &mut GameApp) {
                 });
             }
 
-            // ---- 保存 / 错误提示（右列底部）----
+            // ---- 保存 / 加入背包 / 错误提示（右列底部）----
             ui.add_space(4.0);
             ui.separator();
+            // 添加到角色背包参数（先取值，避免 def 可变借用进闭包）
+            let give_n: u16 = if def.stack > 1 { 10 } else { 1 };
+            let def_name = def.name.clone();
+            let def_id = sel.clone();
             ui.horizontal(|ui| {
                 if ui.button("💾 保存 items.ron").clicked() {
                     match app.db.save() {
@@ -1126,6 +1130,19 @@ pub fn tab_items(ui: &mut egui::Ui, app: &mut GameApp) {
                             }
                         }
                         Err(e) => app.editor.item_err = Some(format!("保存失败: {e}")),
+                    }
+                }
+                if ui.button(format!("🎁 添加到背包 ×{give_n}")).clicked() {
+                    let it = crate::items::Item {
+                        def: def_id.clone(),
+                        count: give_n,
+                        affixes: Vec::new(),
+                    };
+                    if app.inv.add(it, &app.db) {
+                        app.hint = (format!("已获得「{def_name}」×{give_n}"), 1.5);
+                        app.editor.item_err = None;
+                    } else {
+                        app.editor.item_err = Some("背包已满，添加失败".into());
                     }
                 }
                 if let Some(e) = &app.editor.item_err {

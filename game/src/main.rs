@@ -76,6 +76,8 @@ pub struct GameApp {
     pub anim_last_event: Option<String>,
     /// 新手引导剩余显示时间（秒）
     pub guide_t: f32,
+    /// 闪电魔法书自带法术冷却（秒；独立于技能系统）
+    pub tome_cd: f32,
     pub audio: audio::Audio,
     /// 系统设置（音量/震动/键位，持久化于 saves/settings.ron）
     pub settings: settings::Settings,
@@ -166,6 +168,7 @@ impl GameApp {
             anim_preview: None,
             anim_last_event: None,
             guide_t: 8.0,
+            tome_cd: 0.0,
             audio,
             settings,
             veg,
@@ -387,6 +390,113 @@ impl GameApp {
                 }
             }
         }
+    }
+
+    /// 是否持有「闪电魔法书」（背包或任意装备位）
+    pub fn has_tome(&self) -> bool {
+        self.inv
+            .bag
+            .iter()
+            .chain(self.inv.equip.iter())
+            .any(|s| s.as_ref().map(|it| it.def == "tome_lightning").unwrap_or(false))
+    }
+
+    /// 闪电魔法书自带法术：从角色手上引一道闪电连到攻击点（自动索敌鼠标最近敌人，无敌人则轰击鼠标处），独立于技能系统
+    fn cast_tome_lightning(&mut self, ctx: &mut EngineCtx) {
+        const RANGE: f32 = 320.0; // 施法距离（玩家到落点）
+        const AOE: f32 = 34.0; // 落点 AoE 半径
+        let st = self.inv.aggregate(&self.db);
+        let dmg = st.damage(26.0);
+
+        // ---- 选落点：距鼠标最近且在施法距离内的敌人；否则鼠标处（向玩家方向夹回 RANGE）----
+        let mouse = self.mouse_world;
+        let mut strike = mouse;
+        if let Some(m) = self
+            .monsters
+            .list
+            .iter()
+            .filter(|m| m.hp > 0.0 && (m.pos - self.player.pos).length() <= RANGE)
+            .min_by(|a, b| {
+                (a.pos - mouse)
+                    .length()
+                    .total_cmp(&(b.pos - mouse).length())
+            })
+        {
+            strike = m.pos - Vec2::new(0.0, m.half.y);
+        } else {
+            let d = strike - self.player.pos;
+            let dist = d.length();
+            if dist > RANGE {
+                strike = self.player.pos + d / dist * RANGE;
+            }
+        }
+
+        // ---- 手 → 落点 锯齿闪电链（从角色手上一路连接到攻击处）----
+        let hand = self.player.pos
+            + Vec2::new(0.0, -10.0)
+            + Vec2::new(self.player.facing * 5.0, 0.0);
+        // 手部聚能闪光
+        self.vfx.dot(hand, Vec2::ZERO, 0.18, 2.2, [0.85, 0.92, 1.0], 0.0, true);
+        let (n, steps) = (10usize, 3usize);
+        let mut prev = hand;
+        for i in 1..=n {
+            let t = i as f32 / n as f32;
+            let jitter = if i == n {
+                Vec2::ZERO
+            } else {
+                Vec2::new(
+                    self.rng.range_f32(-7.0, 7.0),
+                    self.rng.range_f32(-6.0, 6.0),
+                )
+            };
+            let next = hand.lerp(strike, t) + jitter;
+            for s in 0..steps {
+                let q = prev.lerp(next, s as f32 / steps as f32);
+                self.vfx.dot(q, Vec2::ZERO, 0.2, 2.0, [0.8, 0.9, 1.0], 0.0, true);
+            }
+            prev = next;
+        }
+        // 落点闪光 + 四散火花
+        self.vfx.dot(strike, Vec2::ZERO, 0.3, 3.5, [1.0, 1.0, 1.0], 0.0, true);
+        for _ in 0..8 {
+            let a = self.rng.range_f32(0.0, 6.28);
+            self.vfx.dot(
+                strike,
+                Vec2::new(a.cos() * 80.0, a.sin() * 45.0 - 40.0),
+                0.4,
+                1.4,
+                [0.7, 0.85, 1.0],
+                120.0,
+                true,
+            );
+        }
+
+        // ---- 伤害：落点 AoE 内所有怪物 + 假人 ----
+        let hb = Aabb::new(strike - Vec2::splat(AOE), Vec2::splat(AOE * 2.0));
+        let fx = self.weapons.clone();
+        let hits = self.monsters.melee_hit(&hb, dmg, self.player.facing, false);
+        for hp_pos in &hits {
+            self.audio.play(audio::Sfx::Hit);
+            self.vfx.text(*hp_pos + Vec2::new(0.0, -18.0), dmg as u32, false);
+        }
+        let mut query = self
+            .ecs
+            .query::<(&entities::Transform, &mut entities::Dummy)>();
+        for (_e, (tr, dm)) in query.iter() {
+            if dm.respawn > 0 {
+                continue;
+            }
+            let da = Aabb::new(tr.pos - Vec2::new(0.0, 10.0), Vec2::new(6.0, 10.0));
+            if hb.intersects(&da) {
+                dm.hp -= dmg;
+                dm.flash = 0.18;
+                let _ = self.vfx.spawn(&fx.hit, tr.pos + Vec2::new(0.0, -10.0), 1.0, &mut self.rng);
+                self.vfx.text(tr.pos + Vec2::new(0.0, -18.0), dmg as u32, false);
+            }
+        }
+
+        self.audio.play(audio::Sfx::Explode);
+        ctx.camera.add_shake(3.0);
     }
 
 }
@@ -639,6 +749,19 @@ impl App for GameApp {
             if d.abs() > 2.0 {
                 self.player.facing = d.signum();
             }
+        }
+        // ---- 闪电魔法书（法器）：持有时剑模式左键 = 引雷术（独立冷却，与技能系统无关）----
+        self.tome_cd = (self.tome_cd - 1.0 / 60.0).max(0.0);
+        self.tool.tome_cast = false;
+        if self.has_tome()
+            && matches!(self.tool.tool, Tool::Sword)
+            && !busy
+            && ctx.input.pressed(Action::Attack)
+            && self.tome_cd <= 0.0
+        {
+            self.cast_tome_lightning(ctx);
+            self.tome_cd = 1.2;
+            self.tool.tome_cast = true; // 本次攻击改为引雷，不挥剑
         }
         let (swing, shake_tool) = tools::update(
             &mut self.tool,

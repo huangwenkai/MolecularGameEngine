@@ -99,11 +99,13 @@ pub struct ToolCtx {
     pub tool: Tool,
     pub place_cooldown: u8,
     pub scoop_cooldown: u8,
+    /// 本帧攻击被法器法术接管（如闪电魔法书）：剑不挥砍
+    pub tome_cast: bool,
 }
 
 impl Default for ToolCtx {
     fn default() -> Self {
-        Self { tool: Tool::Sword, place_cooldown: 0, scoop_cooldown: 0 }
+        Self { tool: Tool::Sword, place_cooldown: 0, scoop_cooldown: 0, tome_cast: false }
     }
 }
 
@@ -135,7 +137,7 @@ pub fn update(
 
     match t.tool {
         Tool::Sword => {
-            sword_swing = input.just_pressed(Action::Attack);
+            sword_swing = input.just_pressed(Action::Attack) && !t.tome_cast;
         }
         // 以下工具按住左键循环触发（冷却限频）、单击触发一次（悬停不生效）
         Tool::Pickaxe
