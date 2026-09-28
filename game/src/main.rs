@@ -401,43 +401,33 @@ impl GameApp {
             .any(|s| s.as_ref().map(|it| it.def == "tome_lightning").unwrap_or(false))
     }
 
-    /// 闪电魔法书自带法术：从角色手上引一道闪电连到攻击点（自动索敌鼠标最近敌人，无敌人则轰击鼠标处），独立于技能系统
+    /// 闪电魔法书自带法术：从角色手上一路连接闪电到**鼠标指向的位置**，独立于技能系统
     fn cast_tome_lightning(&mut self, ctx: &mut EngineCtx) {
         const RANGE: f32 = 320.0; // 施法距离（玩家到落点）
         const AOE: f32 = 34.0; // 落点 AoE 半径
         let st = self.inv.aggregate(&self.db);
         let dmg = st.damage(26.0);
 
-        // ---- 选落点：距鼠标最近且在施法距离内的敌人；否则鼠标处（向玩家方向夹回 RANGE）----
+        // ---- 落点 = 鼠标位置（超施法距离向玩家方向夹回）----
         let mouse = self.mouse_world;
-        let mut strike = mouse;
-        if let Some(m) = self
-            .monsters
-            .list
-            .iter()
-            .filter(|m| m.hp > 0.0 && (m.pos - self.player.pos).length() <= RANGE)
-            .min_by(|a, b| {
-                (a.pos - mouse)
-                    .length()
-                    .total_cmp(&(b.pos - mouse).length())
-            })
-        {
-            strike = m.pos - Vec2::new(0.0, m.half.y);
-        } else {
-            let d = strike - self.player.pos;
+        let strike = {
+            let d = mouse - self.player.pos;
             let dist = d.length();
             if dist > RANGE {
-                strike = self.player.pos + d / dist * RANGE;
+                self.player.pos + d / dist * RANGE
+            } else {
+                mouse
             }
-        }
+        };
 
-        // ---- 手 → 落点 锯齿闪电链（从角色手上一路连接到攻击处）----
+        // ---- 手 → 鼠标落点 锯齿闪电链（双层：蓝紫辉光 + 白炽核心，抖动大更显眼）----
         let hand = self.player.pos
             + Vec2::new(0.0, -10.0)
             + Vec2::new(self.player.facing * 5.0, 0.0);
         // 手部聚能闪光
-        self.vfx.dot(hand, Vec2::ZERO, 0.18, 2.2, [0.85, 0.92, 1.0], 0.0, true);
-        let (n, steps) = (10usize, 3usize);
+        self.vfx.dot(hand, Vec2::ZERO, 0.2, 3.0, [0.85, 0.92, 1.0], 0.0, true);
+        self.vfx.dot(hand, Vec2::ZERO, 0.15, 1.6, [1.0, 1.0, 1.0], 0.0, true);
+        let (n, steps) = (14usize, 4usize);
         let mut prev = hand;
         for i in 1..=n {
             let t = i as f32 / n as f32;
@@ -445,28 +435,43 @@ impl GameApp {
                 Vec2::ZERO
             } else {
                 Vec2::new(
-                    self.rng.range_f32(-7.0, 7.0),
-                    self.rng.range_f32(-6.0, 6.0),
+                    self.rng.range_f32(-9.0, 9.0),
+                    self.rng.range_f32(-8.0, 8.0),
                 )
             };
             let next = hand.lerp(strike, t) + jitter;
             for s in 0..steps {
                 let q = prev.lerp(next, s as f32 / steps as f32);
-                self.vfx.dot(q, Vec2::ZERO, 0.2, 2.0, [0.8, 0.9, 1.0], 0.0, true);
+                // 辉光层（宽）+ 白炽核心（窄）：闪电有体积感
+                self.vfx.dot(q, Vec2::ZERO, 0.22, 3.2, [0.55, 0.7, 1.0], 0.0, true);
+                self.vfx.dot(q, Vec2::ZERO, 0.22, 1.7, [1.0, 1.0, 1.0], 0.0, true);
             }
             prev = next;
         }
-        // 落点闪光 + 四散火花
-        self.vfx.dot(strike, Vec2::ZERO, 0.3, 3.5, [1.0, 1.0, 1.0], 0.0, true);
-        for _ in 0..8 {
+        // 落点：双层爆闪 + 冲击环（12 个径向火花）+ 少量飞散电屑
+        self.vfx.dot(strike, Vec2::ZERO, 0.3, 4.5, [0.55, 0.7, 1.0], 0.0, true);
+        self.vfx.dot(strike, Vec2::ZERO, 0.25, 2.5, [1.0, 1.0, 1.0], 0.0, true);
+        for k in 0..12 {
+            let a = k as f32 / 12.0 * std::f32::consts::TAU + self.rng.range_f32(-0.2, 0.2);
+            self.vfx.dot(
+                strike,
+                Vec2::new(a.cos() * 110.0, a.sin() * 55.0 - 40.0),
+                0.45,
+                1.6,
+                [0.7, 0.85, 1.0],
+                130.0,
+                true,
+            );
+        }
+        for _ in 0..6 {
             let a = self.rng.range_f32(0.0, 6.28);
             self.vfx.dot(
                 strike,
-                Vec2::new(a.cos() * 80.0, a.sin() * 45.0 - 40.0),
-                0.4,
-                1.4,
-                [0.7, 0.85, 1.0],
-                120.0,
+                Vec2::new(a.cos() * 60.0, a.sin() * 30.0 - 90.0),
+                0.5,
+                1.2,
+                [0.9, 0.95, 1.0],
+                160.0,
                 true,
             );
         }
