@@ -128,6 +128,7 @@ pub fn action_name(a: Action) -> &'static str {
         Action::Skill1 => "skill1",
         Action::Skill2 => "skill2",
         Action::Skill3 => "skill3",
+        Action::Skill4 => "skill4",
         Action::ToggleIde => "ide",
         Action::Dodge => "dodge",
         Action::Walk => "walk",
@@ -162,6 +163,7 @@ pub fn action_from_name(s: &str) -> Option<Action> {
         "skill1" => Action::Skill1,
         "skill2" => Action::Skill2,
         "skill3" => Action::Skill3,
+        "skill4" => Action::Skill4,
         "ide" => Action::ToggleIde,
         "dodge" => Action::Dodge,
         "walk" => Action::Walk,
@@ -194,6 +196,7 @@ const REBINDABLE: &[Action] = &[
     Action::Skill1,
     Action::Skill2,
     Action::Skill3,
+    Action::Skill4,
     Action::ToggleIde,
     Action::Dodge,
     Action::Walk,
@@ -228,6 +231,7 @@ fn action_label(a: Action) -> &'static str {
         Action::Skill1 => "技能 1 · 旋风斩",
         Action::Skill2 => "技能 2 · 火焰新星",
         Action::Skill3 => "技能 3 · 治疗术",
+        Action::Skill4 => "技能 4 · 闪电术",
         Action::ToggleIde => "引擎 IDE（工程/素材）",
         Action::Dodge => "闪避",
         Action::Walk => "慢走（按住）",
@@ -332,6 +336,7 @@ impl SettingsUi {
                             "主动技能（旋风斩 / 火焰新星 / 治疗术）",
                             &fmt_pair(map, Action::Skill1, Action::Skill3),
                         );
+                        row(ui, "闪电术", &key_of(map, Action::Skill4));
                         row(ui, "系统设置", &key_of(map, Action::ToggleMenu));
                         row(ui, "调试面板", &key_of(map, Action::ToggleDebug));
                         row(ui, "特效编辑器", &key_of(map, Action::ToggleEditor));

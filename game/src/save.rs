@@ -89,7 +89,7 @@ pub fn save_game(app: &mut GameApp) -> std::io::Result<()> {
         torches: app.world.torches.clone(),
         skills: crate::skills::SkillSave {
             pts: app.skills.pts,
-            learned: app.skills.learned,
+            learned: app.skills.learned.to_vec(),
         },
     };
 
@@ -157,7 +157,14 @@ pub fn load_game(app: &mut GameApp) -> std::io::Result<()> {
     app.world.time = meta.time;
     app.world.torches = meta.torches;
     app.skills.pts = meta.skills.pts;
-    app.skills.learned = meta.skills.learned;
+    // learned 兼容旧存档（3 技能）与新存档（4 技能）：补零对齐到当前技能数
+    {
+        let mut l = [0u8; crate::skills::SKILL_N];
+        for (i, v) in meta.skills.learned.iter().take(crate::skills::SKILL_N).enumerate() {
+            l[i] = *v;
+        }
+        app.skills.learned = l;
+    }
     // 怪物/掉落为动态实体，不存档
     app.monsters.list.clear();
     app.monsters.bullets.clear();

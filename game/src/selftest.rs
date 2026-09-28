@@ -816,10 +816,10 @@ pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
             let save_ok = save::save_game(game).is_ok();
             let file_ok = std::path::Path::new("saves/save2.ron").exists()
                 && std::path::Path::new("saves/save2.px").exists();
-            game.skills.learned = [0, 0, 0];
+            game.skills.learned = [0, 0, 0, 0];
             game.skills.pts = 0;
             let load_ok = save::load_game(game).is_ok();
-            let restored = game.skills.learned == [1, 1, 1];
+            let restored = game.skills.learned == [1, 1, 1, 0];
             println!(
                 "[SELFTEST] 存档位二 {} | 文件 {file_ok} 已还原 {restored}",
                 if save_ok && load_ok { "PASS" } else { "FAIL" },
