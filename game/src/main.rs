@@ -760,7 +760,9 @@ impl App for GameApp {
             && self.tome_cd <= 0.0
         {
             self.cast_tome_lightning(ctx);
-            self.tome_cd = 1.2;
+            // 冷却随攻速：基础 1.2s ÷ 攻速倍率（攻速越快引雷越频繁）
+            let st = self.inv.aggregate(&self.db);
+            self.tome_cd = (1.2 / st.atk_speed()).max(0.2);
             self.tool.tome_cast = true; // 本次攻击改为引雷，不挥剑
         }
         let (swing, shake_tool) = tools::update(
