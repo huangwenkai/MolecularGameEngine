@@ -117,23 +117,6 @@ pub struct VfxEditor {
     pub veg_sel: usize,
     /// "重新生长"请求（tick 中消费：需要 &mut world）
     pub veg_regrow_req: bool,
-    // ---- 人物页 ----
-    /// 选中部件序号
-    pub char_sel: usize,
-    /// 画笔颜色
-    pub char_color: [f32; 3],
-    /// 擦除模式（左键变擦除）
-    pub char_erase: bool,
-    /// 待上传图集的部件（tick 中消费：需要 renderer）
-    pub char_dirty: Vec<&'static str>,
-    /// 画布缩放（每像素格边长 px；<=0 视为默认 26）
-    pub char_zoom: f32,
-    /// 撤销栈（部件序号 + 编辑前快照），笔画级
-    pub char_undo: Vec<(usize, image::RgbaImage)>,
-    /// 重做栈
-    pub char_redo: Vec<(usize, image::RgbaImage)>,
-    /// 正在进行的笔画（拖拽全程只压一次快照）
-    pub char_stroke: bool,
     // ---- 物品页 ----
     /// 选中物品 id
     pub item_sel: String,
@@ -144,6 +127,8 @@ pub struct VfxEditor {
     pub icon_path: String,
     /// "导入精灵图"请求（tick 中消费：需要 renderer）
     pub icon_import_req: bool,
+    /// 内置精灵表已自动导入过（只触发一次）
+    pub icon_auto: bool,
     /// 已切入的精灵图帧（选择器展示用；键 = 帧序号）
     pub icon_sheet: Vec<image::RgbaImage>,
     /// "选用第 N 帧作为当前物品图标"请求（tick 中消费：存 PNG + 上传图集）
@@ -844,207 +829,16 @@ pub fn tab_veg(ui: &mut egui::Ui, app: &mut GameApp) {
     ui.small("植被为背景层（与树同层，不碰撞）。改完点\"重新生长\"立即在世界地表生效；新颜色先在 materials.ron 里加材质。");
 }
 
-/// 人物形象编辑页：逐像素绘制部件贴图（实时生效，保存持久化）
-pub fn tab_char(ui: &mut egui::Ui, app: &mut GameApp) {
-    // 部件选择
-    ui.horizontal(|ui| {
-        for (i, def) in crate::character::PARTS.iter().enumerate() {
-            ui.selectable_value(&mut app.editor.char_sel, i, def.label);
-        }
-    });
-    let def = &crate::character::PARTS[app.editor.char_sel];
-    ui.label(format!(
-        "{}（{}×{} 像素，左键涂色 / 右键擦除 / 中键取色）",
-        def.label, def.w, def.h
-    ));
-    ui.separator();
-
-    // 画笔颜色 + 快捷色板
-    ui.horizontal(|ui| {
-        ui.label("画笔");
-        ui.color_edit_button_rgb(&mut app.editor.char_color);
-        for (label, c) in [
-            ("肤", [0.88, 0.68, 0.55]),
-            ("衣", [0.24, 0.47, 0.78]),
-            ("裤", [0.26, 0.26, 0.34]),
-            ("发", [0.35, 0.24, 0.12]),
-            ("白", [0.95, 0.95, 0.95]),
-            ("黑", [0.1, 0.1, 0.12]),
-        ] {
-            let btn = egui::Button::new(label).fill(egui::Color32::from_rgb(
-                (c[0] * 255.0) as u8,
-                (c[1] * 255.0) as u8,
-                (c[2] * 255.0) as u8,
-            ));
-            if ui.add(btn).clicked() {
-                app.editor.char_color = c;
-            }
-        }
-        if ui.button("擦除").clicked() {
-            app.editor.char_color = [0.0, 0.0, 0.0];
-            app.editor.char_erase = true;
-        }
-    });
-
-    // 画布缩放 + 撤销/重做
-    let mut zoom = if app.editor.char_zoom <= 0.0 { 26.0 } else { app.editor.char_zoom };
-    ui.horizontal(|ui| {
-        let zr = ui.add(egui::Slider::new(&mut zoom, 8.0..=48.0).text("画布缩放"));
-        if zr.changed() {
-            app.editor.char_zoom = zoom;
-        }
-        if ui.button("↶ 撤销 (Ctrl+Z)").clicked() {
-            char_undo(app);
-        }
-        if ui.button("↷ 重做 (Ctrl+Y)").clicked() {
-            char_redo(app);
-        }
-    });
-    if ui.ctx().input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::Z)) {
-        char_undo(app);
-    }
-    if ui.ctx().input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::Y)) {
-        char_redo(app);
-    }
-
-    // 逐像素画布（可变借用作用域内完成绘制与重置）
-    let cell = zoom;
-    let mut interacted = false;
-    {
-        let Some(pt) = app.skin.get_mut(def.key) else { return; };
-        egui::Grid::new("char_canvas")
-            .spacing([2.0, 2.0])
-            .show(ui, |ui| {
-                for y in 0..def.h {
-                    for x in 0..def.w {
-                        let px = pt.img.get_pixel(x, y).0;
-                        let (r, g, b, a) = (px[0], px[1], px[2], px[3]);
-                        let shown = if a == 0 {
-                            egui::Color32::from_rgb(44, 44, 52) // 透明格底色
-                        } else {
-                            egui::Color32::from_rgb(r, g, b)
-                        };
-                        let resp = ui
-                            .allocate_response(egui::vec2(cell, cell), egui::Sense::click_and_drag());
-                        ui.painter().rect_filled(resp.rect, 3.0, shown);
-                        ui.painter().rect_filled(resp.rect.shrink(1.0), 2.0, shown);
-                        let lmb = resp.dragged_by(egui::PointerButton::Primary)
-                            || resp.clicked();
-                        // 擦除：擦除模式下左键，或任意模式右键（必须伴随指针交互，防止开启擦除模式瞬间清空整图）
-                        let erase = (app.editor.char_erase && lmb)
-                            || resp.dragged_by(egui::PointerButton::Secondary)
-                            || resp.secondary_clicked();
-                        let paint = !erase && lmb;
-                        // 中键取色
-                        if resp.clicked_by(egui::PointerButton::Middle) && a != 0 {
-                            app.editor.char_color =
-                                [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0];
-                            app.editor.char_erase = false;
-                        }
-                        // 笔画开始：压入一次撤销快照（拖拽全程只压一次）
-                        if (paint || erase) && !app.editor.char_stroke {
-                            app.editor
-                                .char_undo
-                                .push((app.editor.char_sel, pt.img.clone()));
-                            if app.editor.char_undo.len() > 40 {
-                                app.editor.char_undo.remove(0);
-                            }
-                            app.editor.char_redo.clear();
-                            app.editor.char_stroke = true;
-                        }
-                        if paint || erase {
-                            interacted = true;
-                        }
-                        if paint {
-                            let c = app.editor.char_color;
-                            pt.img.put_pixel(
-                                x,
-                                y,
-                                image::Rgba([
-                                    (c[0] * 255.0) as u8,
-                                    (c[1] * 255.0) as u8,
-                                    (c[2] * 255.0) as u8,
-                                    255,
-                                ]),
-                            );
-                            app.editor.char_dirty.push(def.key);
-                        } else if erase && a != 0 {
-                            pt.img.put_pixel(x, y, image::Rgba([0, 0, 0, 0]));
-                            app.editor.char_dirty.push(def.key);
-                        }
-                    }
-                    ui.end_row();
-                }
-            });
-        if ui.button("↺ 重置此部件").clicked() {
-            // 重置可撤销：先压快照
-            let snap = pt.img.clone();
-            crate::character::reset_part(pt);
-            app.editor.char_undo.push((app.editor.char_sel, snap));
-            if app.editor.char_undo.len() > 40 {
-                app.editor.char_undo.remove(0);
-            }
-            app.editor.char_redo.clear();
-            app.editor.char_dirty.push(def.key);
-        }
-        // 无指针交互的帧视为笔画结束
-        if !interacted {
-            app.editor.char_stroke = false;
-        }
-    }
-
-    // 操作
-    ui.horizontal(|ui| {
-        if ui.button("💾 保存形象").clicked() {
-            match crate::character::save(&app.skin) {
-                Ok(_) => tracing::info!("人物形象已保存到 assets/character/"),
-                Err(e) => tracing::error!("人物形象保存失败: {e}"),
-            }
-        }
-        if ui.button("擦除模式").clicked() {
-            app.editor.char_erase = !app.editor.char_erase;
-        }
-        if app.editor.char_erase {
-            ui.colored_label(egui::Color32::YELLOW, "擦除中");
-        }
-    });
-    ui.small("形象实时生效（程序化动画保留）；保存后下次启动自动加载 assets/character/*.png。");
-}
-
-/// 人物编辑：撤销上一次笔画/重置（Ctrl+Z）
-fn char_undo(app: &mut GameApp) {
-    let Some((part, snap)) = app.editor.char_undo.pop() else { return };
-    let key = crate::character::PARTS[part].key;
-    if let Some(pt) = app.skin.get_mut(key) {
-        let cur = pt.img.clone();
-        pt.img = snap;
-        app.editor.char_redo.push((part, cur));
-        app.editor.char_stroke = false;
-    }
-    app.editor.char_dirty.push(key);
-}
-
-/// 人物编辑：重做（Ctrl+Y）
-fn char_redo(app: &mut GameApp) {
-    let Some((part, snap)) = app.editor.char_redo.pop() else { return };
-    let key = crate::character::PARTS[part].key;
-    if let Some(pt) = app.skin.get_mut(key) {
-        let cur = pt.img.clone();
-        pt.img = snap;
-        app.editor.char_undo.push((part, cur));
-        app.editor.char_stroke = false;
-    }
-    app.editor.char_dirty.push(key);
-}
-
 /// 物品页：左侧物品列表 + 保存；右侧按类型展示不同配置参数（选中即显示）
 pub fn tab_items(ui: &mut egui::Ui, app: &mut GameApp) {
     use crate::items::Slot;
+    // 内置图标精灵表（项目收录，随游戏分发；首次进物品页自动导入）
     if app.editor.icon_path.is_empty() {
-        // 预填上次的精灵图路径（首次使用可直接导入）
-        app.editor.icon_path =
-            r"C:\Users\Huang\Downloads\Free - Raven Fantasy Icons\Full Spritesheet\64x64.png"
-                .to_string();
+        app.editor.icon_path = crate::project::dir_of("iconsheets").join("64x64.png").display().to_string();
+    }
+    if app.editor.icon_sheet.is_empty() && !app.editor.icon_auto && !app.editor.icon_import_req {
+        app.editor.icon_auto = true;
+        app.editor.icon_import_req = true;
     }
     ui.columns(2, |cols| {
         // ============ 左列：仅物品选择 ============

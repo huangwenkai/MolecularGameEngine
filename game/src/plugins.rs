@@ -43,7 +43,6 @@ pub fn all_plugins() -> Vec<Box<dyn IdePlugin>> {
         Box::new(VfxPlugin),
         Box::new(AnimPlugin),
         Box::new(VegPlugin),
-        Box::new(CharPlugin),
         Box::new(ItemPlugin),
     ]
 }
@@ -195,7 +194,7 @@ impl IdePlugin for ProjectPlugin {
         egui::Frame::NONE
             .fill(BG_BAR)
             .stroke(Stroke::new(LINE_W, LINE))
-            .inner_margin(Margin::symmetric(6, 5))
+            .inner_margin(Margin::same(6))
             .show(ui, |ui| {
                 ui.set_min_width(ui.available_width());
                 ui.horizontal(|ui| {
@@ -243,7 +242,7 @@ impl IdePlugin for ProjectPlugin {
             egui::Frame::NONE
                 .fill(BG_BAR)
                 .stroke(Stroke::new(LINE_W, LINE))
-                .inner_margin(Margin::symmetric(6, 5))
+                .inner_margin(Margin::same(6))
                 .show(ui, |ui| {
                     ui.set_min_width(ui.available_width());
                     ui.horizontal(|ui| {
@@ -368,20 +367,6 @@ fn veg_list(ui: &mut egui::Ui, app: &mut GameApp) {
     }
 }
 
-/// 人物部件列表
-fn char_list(ui: &mut egui::Ui, app: &mut GameApp) {
-    ui.heading("部件");
-    ui.separator();
-    for (i, p) in crate::character::PARTS.iter().enumerate() {
-        if ui
-            .selectable_label(app.editor.char_sel == i, p.label)
-            .clicked()
-        {
-            app.editor.char_sel = i;
-        }
-    }
-}
-
 /// 物品列表
 fn item_list(ui: &mut egui::Ui, app: &mut GameApp) {
     ui.heading("物品");
@@ -411,5 +396,4 @@ fn item_list(ui: &mut egui::Ui, app: &mut GameApp) {
 editor_plugin!(VfxPlugin, "特效", 0, vfx_list, crate::editor::tab_vfx);
 editor_plugin!(AnimPlugin, "动画", 1, anim_list, crate::editor::tab_anim);
 editor_plugin!(VegPlugin, "植被", 2, veg_list, crate::editor::tab_veg);
-editor_plugin!(CharPlugin, "人物", 3, char_list, crate::editor::tab_char);
 editor_plugin!(ItemPlugin, "物品", 4, item_list, crate::editor::tab_items);

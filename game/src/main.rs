@@ -297,14 +297,6 @@ impl GameApp {
         for (kind, src) in self.editor.shader_req.drain(..) {
             let _ = ctx.renderer.reload_shader(kind, &src);
         }
-        if !self.editor.char_dirty.is_empty() {
-            for key in self.editor.char_dirty.drain(..) {
-                if let Some(pt) = self.skin.get(key) {
-                    let (w, h) = pt.img.dimensions();
-                    ctx.renderer.upload_atlas(pt.ax, pt.ay, w, h, pt.img.as_raw());
-                }
-            }
-        }
         // 动画/物品编辑器数据服务（IDE 暂停模式下也要响应编辑器请求）
         self.editor_data_services(ctx);
     }
@@ -569,16 +561,6 @@ impl App for GameApp {
             let defs = self.veg.plants.clone();
             self.world.regrow_vegetation(&defs);
             tracing::info!("植被已重新生长（{} 种）", defs.len());
-        }
-        // 人物形象编辑器：像素变更 → 上传图集（实时生效）
-        if !self.editor.char_dirty.is_empty() {
-            let keys: Vec<&str> = self.editor.char_dirty.drain(..).collect();
-            for key in keys {
-                if let Some(pt) = self.skin.get(key) {
-                    let (w, h) = pt.img.dimensions();
-                    ctx.renderer.upload_atlas(pt.ax, pt.ay, w, h, pt.img.as_raw());
-                }
-            }
         }
         let fx = self.weapons.clone();
 

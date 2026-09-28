@@ -176,7 +176,7 @@ pub(crate) fn section(
     egui::Frame::NONE
         .fill(BG_SECTION)
         .stroke(Stroke::new(LINE_W, LINE))
-        .inner_margin(Margin::symmetric(6, 5))
+        .inner_margin(Margin::same(6))
         .show(ui, |ui| {
             // 区块内控件统一包一层 ID 作用域，避免 ScrollArea/按钮等 ID 冲突
             ui.push_id(title, |ui| {
@@ -244,7 +244,7 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
             egui::Frame::NONE
                 .fill(BG_BAR)
                 .stroke(Stroke::new(LINE_W, LINE))
-                .inner_margin(Margin::symmetric(6, 4)),
+                .inner_margin(Margin::same(6)),
         )
         .show(ctx, |ui| {
             set_font(ui, app.ide.font_size);
@@ -277,7 +277,7 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
             egui::Frame::NONE
                 .fill(BG_PANEL)
                 .stroke(Stroke::new(LINE_W, LINE))
-                .inner_margin(Margin::ZERO),
+                .inner_margin(Margin::same(6)),
         )
         .show(ctx, |ui| {
             set_font(ui, app.ide.font_size);
@@ -285,7 +285,7 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
             egui::Frame::NONE
                 .fill(BG_BAR)
                 .stroke(Stroke::new(LINE_W, LINE))
-                .inner_margin(Margin::symmetric(6, 5))
+                .inner_margin(Margin::same(6))
                 .show(ui, |ui| {
                     ui.set_min_width(ui.available_width());
                     ui.label(RichText::new(&title).strong().color(ACCENT));
@@ -306,7 +306,7 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
                 egui::Frame::NONE
                     .fill(BG_PANEL)
                     .stroke(Stroke::new(LINE_W, LINE))
-                    .inner_margin(Margin::ZERO),
+                    .inner_margin(Margin::same(6)),
             )
             .show(ctx, |ui| {
                 set_font(ui, app.ide.font_size);
@@ -314,7 +314,7 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
                 egui::Frame::NONE
                     .fill(BG_BAR)
                     .stroke(Stroke::new(LINE_W, LINE))
-                    .inner_margin(Margin::symmetric(6, 5))
+                    .inner_margin(Margin::same(6))
                     .show(ui, |ui| {
                         ui.set_min_width(ui.available_width());
                         ui.label(RichText::new("检查器 Inspector").strong().color(ACCENT));
@@ -332,10 +332,14 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
     egui::CentralPanel::default()
         .frame(if opaque {
             // 不透明：编辑器/文件模式（避免透出游戏画面）
-            egui::Frame::NONE.fill(BG_PANEL)
+            egui::Frame::NONE
+                .fill(BG_PANEL)
+                .inner_margin(Margin::same(6))
         } else {
             // 透明：直接透出实时游戏画面
-            egui::Frame::NONE.fill(Color32::TRANSPARENT)
+            egui::Frame::NONE
+                .fill(Color32::TRANSPARENT)
+                .inner_margin(Margin::same(6))
         })
         .show(ctx, |ui| {
             set_font(ui, app.ide.font_size);

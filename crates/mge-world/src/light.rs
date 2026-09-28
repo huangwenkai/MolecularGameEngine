@@ -240,9 +240,11 @@ impl LightMap {
         bfs_fill(&mut self.sky, &mut queue, self.cw, &opaque, (ex0, ey0, ex1, ey1));
         smooth(&mut self.sky, self.cw, (ex0, ey0, ex1, ey1));
 
-        // 4) 方块光：内圈光源种子 + 边界环种子
+        // 4) 方块光：种子 = 外扩区内全部光源 + 边界环。
+        //    必须用外扩边界（而非内圈）：内圈外 margin 环内的火把（距内圈 < 40 格）
+        //    不入队就无从传播，其光在清零的内圈里凭空消失 → 移动/挖掘时灯光突然熄灭
         let mut queue2: VecDeque<(u32, u8)> = VecDeque::with_capacity(1024);
-        Self::seed_block(torches, ix0, iy0, ix1, iy1, self, &mut queue2);
+        Self::seed_block(torches, ex0, ey0, ex1, ey1, self, &mut queue2);
         self.seed_ring(&self.block, ex0, ey0, ex1, ey1, &mut queue2);
         bfs_fill(&mut self.block, &mut queue2, self.cw, &opaque, (ex0, ey0, ex1, ey1));
         smooth(&mut self.block, self.cw, (ex0, ey0, ex1, ey1));
@@ -292,7 +294,8 @@ impl LightMap {
             }
         }
         let mut queue2: VecDeque<(u32, u8)> = VecDeque::with_capacity(256);
-        Self::seed_block(torches, ix0, iy0, ix1, iy1, self, &mut queue2);
+        // 同 relight_px_region：种子覆盖外扩区全范围，防止 margin 环内火把光凭空消失
+        Self::seed_block(torches, ex0, ey0, ex1, ey1, self, &mut queue2);
         self.seed_ring(&self.block, ex0, ey0, ex1, ey1, &mut queue2);
         bfs_fill(&mut self.block, &mut queue2, self.cw, &opaque, (ex0, ey0, ex1, ey1));
         smooth(&mut self.block, self.cw, (ex0, ey0, ex1, ey1));

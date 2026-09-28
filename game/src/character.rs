@@ -1,6 +1,4 @@
-//! 人物形象：部件贴图数据层（F1 人物页逐像素编辑）
-//! 每个部位是一张小贴图（默认纯色/带五官），编辑器逐像素修改后上传图集实时生效；
-//! 保存到 assets/character/*.png，下次启动自动加载。
+//! 人物形象：部件贴图数据层（程序化生成，可被 assets/character/*.png 覆盖加载）
 use image::{Rgba, RgbaImage};
 
 // 人物形象目录由 crate::project::dir_of("character") 解析
@@ -9,6 +7,7 @@ use image::{Rgba, RgbaImage};
 pub struct PartDef {
     /// 图集 key（渲染查 regions 用）
     pub key: &'static str,
+    #[allow(dead_code)] // 展示用中文名（编辑器已移除，保留便于调试/日志）
     pub label: &'static str,
     pub w: u32,
     pub h: u32,
@@ -84,22 +83,4 @@ pub fn load() -> Skin {
         })
         .collect();
     Skin { parts }
-}
-
-/// 保存全部部件贴图
-pub fn save(skin: &Skin) -> Result<(), String> {
-    let dir = crate::project::dir_of("character");
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    for p in &skin.parts {
-        let path = dir.join(file_name(p.key));
-        p.img.save(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-    }
-    Ok(())
-}
-
-/// 重置部件为默认形象
-pub fn reset_part(pt: &mut PartTex) {
-    if let Some(def) = PARTS.iter().find(|d| d.key == pt.key) {
-        pt.img = default_img(def);
-    }
 }
