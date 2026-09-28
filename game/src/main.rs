@@ -1162,7 +1162,8 @@ impl App for GameApp {
         projectiles::render(&self.projectiles.list, batch, white, white);
         self.vfx
             .render(batch, white, tl, Vec2::new(tl.x + vw, tl.y + vh));
-        self.drops.render(batch, &self.db, white, tl, Vec2::new(tl.x + vw, tl.y + vh));
+        self.drops
+            .render(batch, &self.db, &self.icons, white, tl, Vec2::new(tl.x + vw, tl.y + vh));
         self.monsters
             .render(batch, white, tl, Vec2::new(tl.x + vw, tl.y + vh), &self.anims);
         npc::render(&self.npcs.list, batch, white, tl, Vec2::new(tl.x + vw, tl.y + vh));

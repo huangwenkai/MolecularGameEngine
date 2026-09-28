@@ -179,6 +179,7 @@ impl Drops {
         &self,
         batch: &mut SpriteBatch,
         db: &ItemDb,
+        icons: &crate::icons::IconBank,
         white: &Region,
         tl: Vec2,
         br: Vec2,
@@ -198,10 +199,18 @@ impl Drops {
             batch.push_at(p - Vec2::new(0.0, 6.0), Vec2::new(1.5, 14.0), white, [
                 col[0], col[1], col[2], glow,
             ]);
-            // 物品本体
-            let size = if db.def(&d.item.def).stack > 1 { 2.5 } else { 3.0 };
-            batch.push_at(p, Vec2::splat(size), white, col);
-            batch.push_at(p - Vec2::new(0.5, 0.5), Vec2::splat(size * 0.4), white, [1.0; 4]);
+            // 物品本体：有图标 → 图标精灵（稀有度微染）；无图标 → 稀有度色块回落
+            let def = db.def(&d.item.def);
+            match def.icon.as_ref().and_then(|k| icons.regions.get(k)) {
+                Some(reg) => {
+                    batch.push_at(p, Vec2::splat(7.0), reg, [1.0, 1.0, 1.0, 1.0]);
+                }
+                None => {
+                    let size = if def.stack > 1 { 2.5 } else { 3.0 };
+                    batch.push_at(p, Vec2::splat(size), white, col);
+                    batch.push_at(p - Vec2::new(0.5, 0.5), Vec2::splat(size * 0.4), white, [1.0; 4]);
+                }
+            }
         }
     }
 }
