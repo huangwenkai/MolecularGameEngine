@@ -35,6 +35,10 @@ pub enum Action {
     Skill3,
     /// 主动技能 4（闪电术）
     Skill4,
+    /// 主动技能 5（冰霜新星）
+    Skill5,
+    /// 主动技能 6（毒爆）
+    Skill6,
     /// 引擎 IDE（工程/素材管理）
     ToggleIde,
     /// 闪避（翻滚冲刺，短暂无敌）
@@ -93,6 +97,8 @@ impl ActionMap {
         put(KeyCode::KeyX, Action::Skill2);
         put(KeyCode::KeyC, Action::Skill3);
         put(KeyCode::KeyV, Action::Skill4);
+        put(KeyCode::KeyR, Action::Skill5);
+        put(KeyCode::KeyG, Action::Skill6);
         put(KeyCode::KeyF, Action::Pickup);
         put(KeyCode::KeyK, Action::SkillPanel);
         put(KeyCode::F4, Action::ToggleIde);

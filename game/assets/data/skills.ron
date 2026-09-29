@@ -1,0 +1,62 @@
+// 技能定义（数据驱动：M20 词条化地基）
+// kind: melee_aoe 近身AoE | nova 环形投射物 | heal 治疗 | strike 落雷追踪 | aoe_self 自身毒域
+// status: (kind: burn|poison|frozen, dur: 秒) —— 命中/施加的状态效果
+// dmg: 最终伤害 = (dmg_base + dmg_per_lv × (等级-1)) × 装备加成
+(
+    skills: [
+        (
+            id: "whirlwind", name: "旋风斩", key_hint: "Z",
+            desc: "对周身敌人造成范围伤害",
+            cd: 8.0, kind: "melee_aoe",
+            dmg_base: 14.0, dmg_per_lv: 8.0, radius: 56.0,
+            count: 0, speed: 0.0, proj: "",
+            heal_base: 0.0, heal_per_lv: 0.0,
+            status: None,
+        ),
+        (
+            id: "fire_nova", name: "火焰新星", key_hint: "X",
+            desc: "向四周发射 8 枚火球（点燃）",
+            cd: 12.0, kind: "nova",
+            dmg_base: 26.0, dmg_per_lv: 0.0, radius: 0.0,
+            count: 8, speed: 200.0, proj: "fireball",
+            heal_base: 0.0, heal_per_lv: 0.0,
+            status: Some((kind: "burn", dur: 3.0)),
+        ),
+        (
+            id: "heal", name: "治疗术", key_hint: "C",
+            desc: "恢复生命",
+            cd: 18.0, kind: "heal",
+            dmg_base: 0.0, dmg_per_lv: 0.0, radius: 0.0,
+            count: 0, speed: 0.0, proj: "",
+            heal_base: 30.0, heal_per_lv: 20.0,
+            status: None,
+        ),
+        (
+            id: "lightning", name: "闪电术", key_hint: "V",
+            desc: "雷击离鼠标最近的敌人；无敌人时轰击鼠标落点",
+            cd: 10.0, kind: "strike",
+            dmg_base: 22.0, dmg_per_lv: 12.0, radius: 34.0,
+            count: 0, speed: 0.0, proj: "",
+            heal_base: 0.0, heal_per_lv: 0.0,
+            status: None,
+        ),
+        (
+            id: "frost_nova", name: "冰霜新星", key_hint: "R",
+            desc: "发射 8 枚冰弹，命中冻结减速敌人",
+            cd: 10.0, kind: "nova",
+            dmg_base: 16.0, dmg_per_lv: 5.0, radius: 0.0,
+            count: 8, speed: 170.0, proj: "frost",
+            heal_base: 0.0, heal_per_lv: 0.0,
+            status: Some((kind: "frozen", dur: 2.5)),
+        ),
+        (
+            id: "venom_burst", name: "毒爆", key_hint: "G",
+            desc: "以自身为中心爆发毒域，中毒并伤害周围敌人",
+            cd: 9.0, kind: "aoe_self",
+            dmg_base: 18.0, dmg_per_lv: 10.0, radius: 70.0,
+            count: 0, speed: 0.0, proj: "",
+            heal_base: 0.0, heal_per_lv: 0.0,
+            status: Some((kind: "poison", dur: 4.0)),
+        ),
+    ],
+)

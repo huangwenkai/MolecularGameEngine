@@ -1,7 +1,8 @@
-//! 技能系统：主动技能（学习/升级/冷却/施放）—— 暗黑成长层补全（M17）
+//! 技能系统：主动技能（数据驱动 RON + 学习/升级/冷却/施放）—— M20
 //!
-//! 玩家每升 1 级获得 1 技能点（升级主循环里累加），
-//! 在技能面板 [K] 学习/升级；Z/X/C/V 施放，技能 HUD 显示冷却。
+//! 技能定义在 game/assets/data/skills.ron（工程目录可覆盖）：
+//! 名称/键位/冷却/伤害成长/效果类型（kind）/状态词条（status）。
+//! 玩家每升 1 级获得 1 技能点，技能面板 [K] 学习/升级；Z/X/C/V/R/G 施放。
 use crate::audio;
 use crate::entities;
 use crate::GameApp;
@@ -9,49 +10,85 @@ use glam::Vec2;
 use mge_core::math::Aabb;
 use mge_platform::action::Action;
 use mge_runtime::EngineCtx;
+use std::sync::OnceLock;
 
-/// 技能静态定义
-pub struct SkillDef {
-    pub name: &'static str,
-    pub key_hint: &'static str,
-    pub desc: &'static str,
-    /// 1 级基础冷却（秒）；每升 1 级 -8%
-    pub cd: f32,
+/// 状态效果词条（命中/施加）
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct StatusSpec {
+    pub kind: String, // burn | poison | frozen
+    pub dur: f32,
 }
 
-pub const SKILLS: [SkillDef; 4] = [
-    SkillDef {
-        name: "旋风斩",
-        key_hint: "Z",
-        desc: "对周身敌人造成范围伤害（14 + 8/级）",
-        cd: 8.0,
-    },
-    SkillDef {
-        name: "火焰新星",
-        key_hint: "X",
-        desc: "向四周发射 8 枚火球",
-        cd: 12.0,
-    },
-    SkillDef {
-        name: "治疗术",
-        key_hint: "C",
-        desc: "恢复生命（30 + 20/级）",
-        cd: 18.0,
-    },
-    SkillDef {
-        name: "闪电术",
-        key_hint: "V",
-        desc: "雷击离鼠标最近的敌人（22 + 12/级）；无敌人时轰击鼠标落点（小范围 AoE）",
-        cd: 10.0,
-    },
-];
+/// 技能定义（数据驱动，skills.ron）
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct SkillDef {
+    pub id: String,
+    pub name: String,
+    pub key_hint: String,
+    pub desc: String,
+    pub cd: f32,
+    /// 效果类型：melee_aoe | nova | heal | strike | aoe_self
+    pub kind: String,
+    #[serde(default)]
+    pub dmg_base: f32,
+    #[serde(default)]
+    pub dmg_per_lv: f32,
+    /// AoE 半径 / 打击范围
+    #[serde(default)]
+    pub radius: f32,
+    /// nova 弹数
+    #[serde(default)]
+    pub count: u32,
+    /// nova 弹速
+    #[serde(default)]
+    pub speed: f32,
+    /// nova 投射物：fireball | frost | poison
+    #[serde(default)]
+    pub proj: String,
+    #[serde(default)]
+    pub heal_base: f32,
+    #[serde(default)]
+    pub heal_per_lv: f32,
+    /// 状态词条
+    #[serde(default)]
+    pub status: Option<StatusSpec>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct SkillsRoot {
+    skills: Vec<SkillDef>,
+}
+
+fn embedded_defs() -> Vec<SkillDef> {
+    ron::from_str::<SkillsRoot>(include_str!("../assets/data/skills.ron"))
+        .expect("skills.ron 解析失败")
+        .skills
+}
+
+static DEFS: OnceLock<Vec<SkillDef>> = OnceLock::new();
+
+/// 技能定义表（首访加载；工程目录 data/skills.ron 可覆盖内置表）
+pub fn defs() -> &'static [SkillDef] {
+    DEFS.get_or_init(|| {
+        let p = crate::project::dir_of("data").join("skills.ron");
+        if let Ok(s) = std::fs::read_to_string(&p) {
+            match ron::from_str::<SkillsRoot>(&s) {
+                Ok(r) if !r.skills.is_empty() => {
+                    tracing::info!("技能表加载（工程覆盖）：{} 个技能", r.skills.len());
+                    return r.skills;
+                }
+                Ok(_) => tracing::warn!("工程 skills.ron 为空，使用内置技能表"),
+                Err(e) => tracing::warn!("工程 skills.ron 解析失败: {e}，使用内置技能表"),
+            }
+        }
+        embedded_defs()
+    })
+}
 
 pub const SKILL_MAX_LV: u8 = 5;
-/// 技能数量（learned/cds 数组长度）
-pub const SKILL_N: usize = 4;
 
 /// 存档用快照（冷却不存）。
-/// learned 用 Vec：旧存档 3 技能 / 新存档 4 技能都能反序列化（加载时补零对齐）。
+/// learned 用 Vec：技能数量演进时旧档自动补零对齐。
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct SkillSave {
     pub pts: u8,
@@ -63,32 +100,49 @@ pub struct Skills {
     /// 未分配技能点
     pub pts: u8,
     /// 各技能等级（0 = 未学习）
-    pub learned: [u8; SKILL_N],
+    pub learned: Vec<u8>,
     /// 技能面板是否打开（独立面板，默认 K）
     pub ui_open: bool,
     /// 剩余冷却（秒）
-    cds: [f32; SKILL_N],
+    cds: Vec<f32>,
 }
 
 impl Skills {
+    /// 对齐技能定义数量（启动/读档后调用）
+    pub fn resize_to_defs(&mut self) {
+        let n = defs().len();
+        self.learned.resize(n, 0);
+        self.cds.resize(n, 0.0);
+    }
+
     /// 某等级下的实际冷却（秒）
     pub fn cd_of(&self, i: usize) -> f32 {
-        let lv = self.learned[i].max(1) as f32;
-        SKILLS[i].cd * (1.0 - 0.08 * (lv - 1.0))
+        let lv = self.learned.get(i).copied().unwrap_or(0).max(1) as f32;
+        defs()[i].cd * (1.0 - 0.08 * (lv - 1.0))
     }
 
     pub fn cd_remaining(&self, i: usize) -> f32 {
-        self.cds[i]
+        self.cds.get(i).copied().unwrap_or(0.0)
     }
 
     /// 学习/升级（消耗 1 技能点）；成功返回 true
     pub fn learn(&mut self, i: usize) -> bool {
-        if self.pts == 0 || self.learned[i] >= SKILL_MAX_LV {
+        if self.pts == 0 || self.learned.get(i).copied().unwrap_or(0) >= SKILL_MAX_LV {
             return false;
         }
-        self.learned[i] += 1;
+        if let Some(l) = self.learned.get_mut(i) {
+            *l += 1;
+        }
         self.pts -= 1;
         true
+    }
+
+    /// 免费习得 1 级（实验按钮用）
+    pub fn grant(&mut self, i: usize) {
+        if let Some(l) = self.learned.get_mut(i) {
+            *l = (*l).max(1);
+        }
+        self.cds.resize(defs().len(), 0.0);
     }
 }
 
@@ -97,32 +151,42 @@ pub fn tick(app: &mut GameApp, ctx: &mut EngineCtx) {
     for cd in app.skills.cds.iter_mut() {
         *cd = (*cd - 1.0 / 60.0).max(0.0);
     }
-    let want = if ctx.input.just_pressed(Action::Skill1) {
-        Some(0)
-    } else if ctx.input.just_pressed(Action::Skill2) {
-        Some(1)
-    } else if ctx.input.just_pressed(Action::Skill3) {
-        Some(2)
-    } else if ctx.input.just_pressed(Action::Skill4) {
-        Some(3)
-    } else {
-        None
-    };
+    let keys = [
+        Action::Skill1,
+        Action::Skill2,
+        Action::Skill3,
+        Action::Skill4,
+        Action::Skill5,
+        Action::Skill6,
+    ];
+    let want = keys.iter().position(|a| ctx.input.just_pressed(*a));
     let Some(i) = want else { return };
-    if app.skills.learned[i] == 0 {
-        app.hint =
-            (format!("尚未学习「{}」（按 K 打开技能面板，用技能点学习）", SKILLS[i].name), 2.0);
+    let Some(def) = defs().get(i) else { return };
+    if app.skills.learned.get(i).copied().unwrap_or(0) == 0 {
+        app.hint = (format!(
+            "尚未学习「{}」（按 K 打开技能面板，用技能点学习）",
+            def.name
+        ), 2.0);
         return;
     }
-    if app.skills.cds[i] > 0.0 {
-        app.hint = (format!("「{}」冷却中 {:.1}s", SKILLS[i].name, app.skills.cds[i]), 1.0);
+    if app.skills.cds.get(i).copied().unwrap_or(0.0) > 0.0 {
+        app.hint = (
+            format!("「{}」冷却中 {:.1}s", def.name, app.skills.cd_remaining(i)),
+            1.0,
+        );
         return;
     }
-    let ok = match i {
-        0 => cast_whirlwind(app, ctx),
-        1 => cast_fire_nova(app),
-        2 => cast_heal(app),
-        _ => cast_lightning(app, ctx),
+    let lv = app.skills.learned[i] as f32;
+    let ok = match def.kind.as_str() {
+        "melee_aoe" => cast_melee_aoe(app, ctx, def, lv),
+        "nova" => cast_nova(app, def),
+        "heal" => cast_heal(app, def, lv),
+        "strike" => cast_strike(app, ctx, def, lv),
+        "aoe_self" => cast_aoe_self(app, ctx, def, lv),
+        other => {
+            app.hint = (format!("未知技能效果类型「{other}」"), 1.5);
+            false
+        }
     };
     if ok {
         app.skills.cds[i] = app.skills.cd_of(i);
@@ -130,12 +194,14 @@ pub fn tick(app: &mut GameApp, ctx: &mut EngineCtx) {
     }
 }
 
-/// 旋风斩：周身 AoE（怪物 + 假人），返回是否施放成功
-fn cast_whirlwind(app: &mut GameApp, ctx: &mut EngineCtx) -> bool {
+/// 近身 AoE（旋风斩类）：周身范围伤害（怪物 + 假人）
+fn cast_melee_aoe(app: &mut GameApp, ctx: &mut EngineCtx, def: &SkillDef, lv: f32) -> bool {
     let st = app.inv.aggregate(&app.db);
-    let lv = app.skills.learned[0] as f32;
-    let dmg = st.damage(14.0 + 8.0 * (lv - 1.0));
-    let hb = Aabb::new(app.player.pos - Vec2::new(0.0, 10.0), Vec2::new(56.0, 32.0));
+    let dmg = st.damage(def.dmg_base + def.dmg_per_lv * (lv - 1.0));
+    let hb = Aabb::new(
+        app.player.pos - Vec2::new(0.0, 10.0),
+        Vec2::new(def.radius, def.radius * 0.6),
+    );
     let fx = app.weapons.clone();
 
     // 怪物
@@ -167,12 +233,13 @@ fn cast_whirlwind(app: &mut GameApp, ctx: &mut EngineCtx) -> bool {
             app.vfx.text(tr.pos + Vec2::new(0.0, -18.0), dmg as u32, false);
         }
     }
-    // 旋风特效：环形白光粒子 + 挥砍音效
+    // 旋风特效：环形白光粒子（半径随定义）+ 挥砍音效
+    let rr = def.radius * 0.5;
     for k in 0..20 {
         let a = k as f32 / 20.0 * std::f32::consts::TAU;
         app.vfx.dot(
             app.player.pos - Vec2::new(0.0, 10.0)
-                + Vec2::new(a.cos() * 26.0, a.sin() * 14.0),
+                + Vec2::new(a.cos() * rr, a.sin() * rr * 0.55),
             Vec2::new(a.cos() * 120.0, a.sin() * 60.0 - 20.0),
             0.35,
             1.6,
@@ -186,30 +253,31 @@ fn cast_whirlwind(app: &mut GameApp, ctx: &mut EngineCtx) -> bool {
     true
 }
 
-/// 火焰新星：8 方向火球
-fn cast_fire_nova(app: &mut GameApp) -> bool {
+/// 环形投射物新星（火焰/冰霜等，弹种由数据决定）
+fn cast_nova(app: &mut GameApp, def: &SkillDef) -> bool {
     let hand = app.player.pos + Vec2::new(0.0, -10.0);
-    for k in 0..8 {
-        let a = k as f32 / 8.0 * std::f32::consts::TAU;
+    let kind = match def.proj.as_str() {
+        "frost" => crate::projectiles::ProjKind::FrostBolt,
+        "poison" => crate::projectiles::ProjKind::PoisonBolt,
+        _ => crate::projectiles::ProjKind::Fireball,
+    };
+    for k in 0..def.count {
+        let a = k as f32 / def.count as f32 * std::f32::consts::TAU;
         let dir = Vec2::new(a.cos(), a.sin()).normalize_or_zero();
-        app.projectiles.spawn(
-            crate::projectiles::ProjKind::Fireball,
-            hand + dir * 8.0,
-            dir * 200.0,
-        );
+        app.projectiles
+            .spawn(kind, hand + dir * 8.0, dir * def.speed);
     }
     app.audio.play(audio::Sfx::Shoot);
     true
 }
 
-/// 治疗术：满血时不施放（不进冷却）
-fn cast_heal(app: &mut GameApp) -> bool {
+/// 治疗：满血时不施放（不进冷却）
+fn cast_heal(app: &mut GameApp, def: &SkillDef, lv: f32) -> bool {
     if app.player.hp >= app.player.max_hp {
         app.hint = ("生命值已满，治疗术未施放".to_string(), 1.0);
         return false;
     }
-    let lv = app.skills.learned[2] as f32;
-    let amount = 30.0 + 20.0 * (lv - 1.0);
+    let amount = def.heal_base + def.heal_per_lv * (lv - 1.0);
     app.player.hp = (app.player.hp + amount).min(app.player.max_hp);
     for _ in 0..14 {
         let a = app.rng.range_f32(0.0, 6.28);
@@ -228,13 +296,12 @@ fn cast_heal(app: &mut GameApp) -> bool {
     true
 }
 
-/// 闪电术：雷击离鼠标最近的敌人（施法距离内）；无敌人时轰击鼠标落点（小范围 AoE）
-fn cast_lightning(app: &mut GameApp, ctx: &mut EngineCtx) -> bool {
+/// 落雷（闪电术类）：雷击离鼠标最近的敌人；无敌人时轰击鼠标落点（小范围 AoE）
+fn cast_strike(app: &mut GameApp, ctx: &mut EngineCtx, def: &SkillDef, lv: f32) -> bool {
     const RANGE: f32 = 320.0; // 施法距离（玩家到落点）
-    const AOE: f32 = 34.0; // 落点 AoE 半径
+    let aoe = def.radius.max(8.0);
     let st = app.inv.aggregate(&app.db);
-    let lv = app.skills.learned[3] as f32;
-    let dmg = st.damage(22.0 + 12.0 * (lv - 1.0));
+    let dmg = st.damage(def.dmg_base + def.dmg_per_lv * (lv - 1.0));
 
     // ---- 选落点：距鼠标最近且在施法距离内的敌人；否则鼠标处（向玩家方向夹回 RANGE）----
     let mouse = app.mouse_world;
@@ -284,7 +351,7 @@ fn cast_lightning(app: &mut GameApp, ctx: &mut EngineCtx) -> bool {
     }
 
     // ---- 伤害：落点 AoE 内所有怪物（直击感：受击闪白 + 击退）----
-    let hb = Aabb::new(strike - Vec2::splat(AOE), Vec2::splat(AOE * 2.0));
+    let hb = Aabb::new(strike - Vec2::splat(aoe), Vec2::splat(aoe * 2.0));
     let hits = app.monsters.melee_hit(&hb, dmg, app.player.facing, true);
     for hp_pos in &hits {
         app.audio.play(audio::Sfx::Hit);
@@ -313,6 +380,73 @@ fn cast_lightning(app: &mut GameApp, ctx: &mut EngineCtx) -> bool {
     true
 }
 
+/// 自身毒域（毒爆类）：以玩家为中心的范围中毒 + 伤害
+fn cast_aoe_self(app: &mut GameApp, ctx: &mut EngineCtx, def: &SkillDef, lv: f32) -> bool {
+    let st = app.inv.aggregate(&app.db);
+    let dmg = st.damage(def.dmg_base + def.dmg_per_lv * (lv - 1.0));
+    let r = def.radius.max(20.0);
+    // 毒环视觉
+    let n = 24;
+    for k in 0..n {
+        let a = k as f32 / n as f32 * std::f32::consts::TAU;
+        app.vfx.dot(
+            app.player.pos - Vec2::new(0.0, 10.0)
+                + Vec2::new(a.cos() * r, a.sin() * r * 0.5),
+            Vec2::new(a.cos() * 90.0, a.sin() * 45.0 - 30.0),
+            0.5,
+            2.2,
+            [0.35, 0.9, 0.3],
+            60.0,
+            true,
+        );
+    }
+    // 范围内怪物受击 + 中毒
+    let hb = Aabb::new(
+        app.player.pos - Vec2::new(0.0, 10.0) - Vec2::splat(r),
+        Vec2::splat(r * 2.0),
+    );
+    let hits = app.monsters.melee_hit(&hb, dmg, app.player.facing, false);
+    for hp_pos in &hits {
+        app.audio.play(audio::Sfx::Hit);
+        app.vfx.text(*hp_pos + Vec2::new(0.0, -18.0), dmg as u32, false);
+        if let Some(st_spec) = &def.status {
+            if let Some(kind) = status_kind(&st_spec.kind) {
+                app.monsters.apply_status_at(*hp_pos, kind, st_spec.dur);
+            }
+        }
+    }
+    // 假人
+    let fx = app.weapons.clone();
+    let mut query = app
+        .ecs
+        .query::<(&entities::Transform, &mut entities::Dummy)>();
+    for (_e, (tr, dm)) in query.iter() {
+        if dm.respawn > 0 {
+            continue;
+        }
+        let da = Aabb::new(tr.pos - Vec2::new(0.0, 10.0), Vec2::new(6.0, 10.0));
+        if hb.intersects(&da) {
+            dm.hp -= dmg;
+            dm.flash = 0.18;
+            let _ = app.vfx.spawn(&fx.hit, tr.pos + Vec2::new(0.0, -10.0), 1.0, &mut app.rng);
+            app.vfx.text(tr.pos + Vec2::new(0.0, -18.0), dmg as u32, false);
+        }
+    }
+    app.audio.play(audio::Sfx::Explode);
+    ctx.camera.add_shake(3.0);
+    true
+}
+
+/// 状态词条字符串 → StatusKind
+fn status_kind(s: &str) -> Option<crate::monsters::StatusKind> {
+    match s {
+        "burn" => Some(crate::monsters::StatusKind::Burn),
+        "poison" => Some(crate::monsters::StatusKind::Poison),
+        "frozen" => Some(crate::monsters::StatusKind::Frozen),
+        _ => None,
+    }
+}
+
 /// 技能 HUD（左下角）：键位 + 冷却状态
 pub fn draw_hud(app: &GameApp, ctx: &egui::Context) {
     // 设置面板/引擎 IDE 打开时不绘制（IDE 独占界面，HUD 为 Area 前景层会压在其上）
@@ -325,8 +459,8 @@ pub fn draw_hud(app: &GameApp, ctx: &egui::Context) {
             egui::Frame::group(ui.style()).show(ui, |ui| {
                 ui.set_min_width(120.0);
                 ui.label(format!("技能点 {}", app.skills.pts));
-                for (i, def) in SKILLS.iter().enumerate() {
-                    let lv = app.skills.learned[i];
+                for (i, def) in defs().iter().enumerate() {
+                    let lv = app.skills.learned.get(i).copied().unwrap_or(0);
                     let (txt, color) = if lv == 0 {
                         (format!("[{}] {} 未学习", def.key_hint, def.name), egui::Color32::GRAY)
                     } else {
@@ -387,8 +521,8 @@ pub fn draw_window(app: &mut GameApp, ctx: &egui::Context) {
                 ui.weak("升级可获得技能点（每级 1 点）");
             }
             ui.separator();
-            for (i, def) in SKILLS.iter().enumerate() {
-                let lv = app.skills.learned[i];
+            for (i, def) in defs().iter().enumerate() {
+                let lv = app.skills.learned.get(i).copied().unwrap_or(0);
                 ui.horizontal(|ui| {
                     ui.monospace(format!(
                         "[{}] {}{}",
@@ -413,13 +547,13 @@ pub fn draw_window(app: &mut GameApp, ctx: &egui::Context) {
                     }
                 });
                 ui.horizontal(|ui| {
-                    ui.small(def.desc);
+                    ui.small(def.desc.as_str());
                     if lv > 0 {
                         ui.small(format!("冷却 {:.1}s", app.skills.cd_of(i)));
                     }
                 });
             }
             ui.separator();
-            ui.small("技能数据随存档保存；Z/X/C/V 施放。");
+            ui.small("技能定义：data/skills.ron（数据驱动，工程目录可覆盖）；Z/X/C/V/R/G 施放。");
         });
 }

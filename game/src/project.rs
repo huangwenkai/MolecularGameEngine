@@ -120,6 +120,7 @@ impl ProjectManager {
             "data/vfx.ron",
             "data/weapons.ron",
             "data/animations.ron",
+            "data/skills.ron",
             "shaders/sprite.wgsl",
             "shaders/pixels.wgsl",
             "shaders/composite.wgsl",

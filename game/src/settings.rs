@@ -130,6 +130,8 @@ pub fn action_name(a: Action) -> &'static str {
         Action::Skill2 => "skill2",
         Action::Skill3 => "skill3",
         Action::Skill4 => "skill4",
+        Action::Skill5 => "skill5",
+        Action::Skill6 => "skill6",
         Action::ToggleIde => "ide",
         Action::Dodge => "dodge",
         Action::Walk => "walk",
@@ -165,6 +167,8 @@ pub fn action_from_name(s: &str) -> Option<Action> {
         "skill2" => Action::Skill2,
         "skill3" => Action::Skill3,
         "skill4" => Action::Skill4,
+        "skill5" => Action::Skill5,
+        "skill6" => Action::Skill6,
         "ide" => Action::ToggleIde,
         "dodge" => Action::Dodge,
         "walk" => Action::Walk,
@@ -198,6 +202,8 @@ const REBINDABLE: &[Action] = &[
     Action::Skill2,
     Action::Skill3,
     Action::Skill4,
+    Action::Skill5,
+    Action::Skill6,
     Action::ToggleIde,
     Action::Dodge,
     Action::Walk,
@@ -234,6 +240,8 @@ fn action_label(a: Action) -> &'static str {
         Action::Skill2 => "技能 2 · 火焰新星",
         Action::Skill3 => "技能 3 · 治疗术",
         Action::Skill4 => "技能 4 · 闪电术",
+        Action::Skill5 => "技能 5 · 冰霜新星",
+        Action::Skill6 => "技能 6 · 毒爆",
         Action::ToggleIde => "引擎 IDE（工程/素材）",
         Action::Dodge => "闪避",
         Action::Walk => "慢走（按住）",
@@ -294,6 +302,10 @@ pub enum LabReq {
     ClearMonsters,
     /// 切换到单向平台工具
     SelectPlatformTool,
+    /// 免费习得冰霜新星
+    LearnFrostNova,
+    /// 免费习得毒爆
+    LearnVenomBurst,
 }
 
 #[derive(Default)]
@@ -362,6 +374,8 @@ impl SettingsUi {
                             &fmt_pair(map, Action::Skill1, Action::Skill3),
                         );
                         row(ui, "闪电术", &key_of(map, Action::Skill4));
+                        row(ui, "冰霜新星", &key_of(map, Action::Skill5));
+                        row(ui, "毒爆", &key_of(map, Action::Skill6));
                         row(ui, "系统设置", &key_of(map, Action::ToggleMenu));
                         row(ui, "调试面板", &key_of(map, Action::ToggleDebug));
                         row(ui, "特效编辑器", &key_of(map, Action::ToggleEditor));
@@ -488,7 +502,15 @@ impl SettingsUi {
                 if ui.button("🪜 单向平台工具").clicked() {
                     self.lab_reqs.push(LabReq::SelectPlatformTool);
                 }
-                ui.small("新功能在此配测试按钮：毒抗怪物/毒法书/毒液瓶/单向平台，怪物生成在面前");
+                ui.horizontal(|ui| {
+                    if ui.button("❄️ 学习冰霜新星").clicked() {
+                        self.lab_reqs.push(LabReq::LearnFrostNova);
+                    }
+                    if ui.button("🟢 学习毒爆").clicked() {
+                        self.lab_reqs.push(LabReq::LearnVenomBurst);
+                    }
+                });
+                ui.small("新功能在此配测试按钮：毒抗怪物/毒法书/毒液瓶/单向平台/新技能，怪物生成在面前");
                 ui.add_space(6.0);
                     }); // columns
                 }); // ScrollArea

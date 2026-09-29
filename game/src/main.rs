@@ -519,6 +519,8 @@ impl App for GameApp {
         self.regions = art.regions;
         // 物品图标库（assets/icons/*.png → 图集）
         self.icons.load_dir(ctx.renderer);
+        // 技能表对齐（首次触发 RON 加载）
+        self.skills.resize_to_defs();
         // 调色板 + 世界/光照纹理
         let pal = art::palette(&self.world.mats);
         ctx.renderer.set_palette(&pal);
@@ -957,7 +959,9 @@ impl App for GameApp {
             let base = match p.kind {
                 projectiles::ProjKind::Arrow => projectiles::ARROW_DMG,
                 projectiles::ProjKind::Fireball => projectiles::FIREBALL_DMG,
-                projectiles::ProjKind::PoisonBolt => projectiles::POISON_BOLT_DMG,
+                projectiles::ProjKind::PoisonBolt | projectiles::ProjKind::FrostBolt => {
+                    projectiles::POISON_BOLT_DMG
+                }
             };
             let dmg = st.damage(base) * if crit { crit_mult } else { 1.0 };
             if let Some(mpos) = self.monsters.proj_hit(p.pos, dmg) {
@@ -981,6 +985,12 @@ impl App for GameApp {
                 self.monsters.apply_status_at(pos, monsters::StatusKind::Poison, 4.0);
                 self.monsters
                     .apply_status_area(pos, 30.0, monsters::StatusKind::Poison, 3.0);
+                let _ = self.vfx.spawn(&fx.hit_spark, pos, 1.0, &mut self.rng);
+            } else if kind == projectiles::ProjKind::FrostBolt {
+                // 冰弹：直击目标冰冻 3s，溅射 30px 范围冰冻 2s（减速）
+                self.monsters.apply_status_at(pos, monsters::StatusKind::Frozen, 3.0);
+                self.monsters
+                    .apply_status_area(pos, 30.0, monsters::StatusKind::Frozen, 2.0);
                 let _ = self.vfx.spawn(&fx.hit_spark, pos, 1.0, &mut self.rng);
             } else {
                 let _ = self.vfx.spawn(&fx.arrow_hit, pos, 1.0, &mut self.rng);
@@ -1248,6 +1258,20 @@ impl App for GameApp {
                     self.tool.tool = tools::Tool::Platform;
                     self.action.current = None;
                     self.hint = ("已切换单向平台工具（按 9 亦可）——放置后从上方可站立，按 S 下落穿透".to_string(), 2.5);
+                }
+                LabReq::LearnFrostNova | LabReq::LearnVenomBurst => {
+                    let id = match req {
+                        LabReq::LearnFrostNova => "frost_nova",
+                        _ => "venom_burst",
+                    };
+                    match crate::skills::defs().iter().position(|d| d.id == id) {
+                        Some(i) => {
+                            self.skills.grant(i);
+                            let name = crate::skills::defs()[i].name.clone();
+                            self.hint = (format!("已习得「{name}」Lv.1（实验）"), 1.8);
+                        }
+                        None => self.hint = ("技能表中找不到该技能".to_string(), 1.5),
+                    }
                 }
                 LabReq::GivePoisonTome | LabReq::GiveLightningTome | LabReq::GivePoisonVial => {
                     let def = match req {
