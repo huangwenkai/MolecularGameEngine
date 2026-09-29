@@ -38,6 +38,8 @@ pub struct World {
     pub spawn_y: i32,
     /// 火把位置（像素坐标）
     pub torches: Vec<(i32, i32)>,
+    /// 建筑件（木墙/门/工作台/床）
+    pub pieces: Vec<crate::pieces::Piece>,
     torch_mat: u8,
     terrain_dirty: bool,
     light_frame: u32,
@@ -100,6 +102,7 @@ impl World {
             spawn_x: gr.spawn_x,
             spawn_y: gr.spawn_y,
             torches: Vec::new(),
+            pieces: Vec::new(),
             torch_mat,
             terrain_dirty: true,
             light_frame: 0,
@@ -114,7 +117,53 @@ impl World {
 
     #[inline]
     pub fn solid_px(&self, x: i32, y: i32) -> bool {
+        // 建筑件：木墙与关闭的门参与碰撞
+        for p in &self.pieces {
+            let solid = match p.kind {
+                crate::pieces::PieceKind::Wall => true,
+                crate::pieces::PieceKind::Door => !p.open,
+                _ => false,
+            };
+            if solid && p.contains(x, y) {
+                return true;
+            }
+        }
         self.mats.def(self.pixels.get(x, y).mat).solid
+    }
+
+    /// 放置建筑件：区域内不得有实心像素或重叠建筑件；同位同类 → 移除（放置即拆除）
+    /// 返回 Some(true)=放置 Some(false)=移除 None=失败
+    pub fn place_piece(
+        &mut self,
+        kind: crate::pieces::PieceKind,
+        x: i32,
+        y: i32,
+    ) -> Option<bool> {
+        let (w, h) = kind.size();
+        for yy in y..y + h {
+            for xx in x..x + w {
+                if self.mats.def(self.pixels.get(xx, yy).mat).solid {
+                    return None;
+                }
+            }
+        }
+        for p in &self.pieces {
+            if p.overlaps(x, y, w, h) {
+                if p.kind == kind && p.x == x && p.y == y {
+                    let px = p.x;
+                    let py = p.y;
+                    self.pieces.retain(|q| q.x != px || q.y != py);
+                    return Some(false);
+                }
+                return None;
+            }
+        }
+        self.pieces.push(crate::pieces::Piece { kind, x, y, open: false });
+        Some(true)
+    }
+
+    pub fn clear_pieces(&mut self) {
+        self.pieces.clear();
     }
 
     #[inline]

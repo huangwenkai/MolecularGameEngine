@@ -13,6 +13,9 @@ struct Meta {
     inv: InvData,
     time: f32,
     torches: Vec<(i32, i32)>,
+    /// 建筑件（M21 新增；serde(default) 兼容旧存档）
+    #[serde(default)]
+    pieces: Vec<mge_world::pieces::Piece>,
     /// 技能（M17 新增；serde(default) 兼容旧存档）
     #[serde(default)]
     skills: crate::skills::SkillSave,
@@ -87,6 +90,7 @@ pub fn save_game(app: &mut GameApp) -> std::io::Result<()> {
         },
         time: app.world.time,
         torches: app.world.torches.clone(),
+        pieces: app.world.pieces.clone(),
         skills: crate::skills::SkillSave {
             pts: app.skills.pts,
             learned: app.skills.learned.clone(),
@@ -156,6 +160,7 @@ pub fn load_game(app: &mut GameApp) -> std::io::Result<()> {
     app.inv.attr = meta.inv.attr;
     app.world.time = meta.time;
     app.world.torches = meta.torches;
+    app.world.pieces = meta.pieces;
     app.skills.pts = meta.skills.pts;
     // learned 兼容旧存档（技能数演进）：对齐到当前技能定义数量
     app.skills.resize_to_defs();

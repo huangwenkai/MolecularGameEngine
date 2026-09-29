@@ -78,6 +78,8 @@ pub struct GameApp {
     pub guide_t: f32,
     /// 闪电魔法书自带法术冷却（秒；独立于技能系统）
     pub tome_cd: f32,
+    /// 建造工具当前选中的建筑件
+    pub build_sel: mge_world::pieces::PieceKind,
     pub audio: audio::Audio,
     /// 系统设置（音量/震动/键位，持久化于 saves/settings.ron）
     pub settings: settings::Settings,
@@ -169,6 +171,7 @@ impl GameApp {
             anim_last_event: None,
             guide_t: 8.0,
             tome_cd: 0.0,
+            build_sel: mge_world::pieces::PieceKind::Wall,
             audio,
             settings,
             veg,
@@ -617,6 +620,7 @@ impl App for GameApp {
             (Action::Slot7, Tool::Bow),
             (Action::Slot8, Tool::Fireball),
             (Action::Slot9, Tool::Platform),
+            (Action::Slot10, Tool::Build),
         ] {
             if ctx.input.just_pressed(slot) {
                 self.tool.tool = tool;
@@ -795,6 +799,42 @@ impl App for GameApp {
                 }
             }
             self.tool.tome_cast = true; // 本次攻击改为施法，不挥剑
+        }
+        // ---- 建造工具：放置建筑件（木墙/门/工作台/床）----
+        if matches!(self.tool.tool, Tool::Build)
+            && !busy
+            && ctx.input.pressed(Action::Attack)
+            && self.tool.place_cooldown == 0
+        {
+            let (w, h) = self.build_sel.size();
+            let (cx, cy) = (tools::snap2(self.mouse_world.x), tools::snap2(self.mouse_world.y));
+            let px = cx - w / 2;
+            let py = cy - h / 2;
+            match self.world.place_piece(self.build_sel, px, py) {
+                Some(true) => {
+                    self.tool.place_cooldown = 6;
+                    self.audio.play(audio::Sfx::Place);
+                }
+                Some(false) => {
+                    self.tool.place_cooldown = 6;
+                    self.audio.play(audio::Sfx::Mine);
+                    self.hint = ("已拆除建筑件".to_string(), 1.0);
+                }
+                None => {
+                    self.tool.place_cooldown = 10;
+                    self.hint = ("无法放置：位置被地形/其他建筑件占用".to_string(), 1.2);
+                }
+            }
+        }
+        // ---- 门自动开关：玩家靠近开门，离开关门 ----
+        {
+            let pcenter = self.player.pos - Vec2::new(0.0, self.player.half.y);
+            for p in self.world.pieces.iter_mut() {
+                if p.kind == mge_world::pieces::PieceKind::Door {
+                    let c = Vec2::new(p.x as f32 + 3.0, p.y as f32 + 6.0);
+                    p.open = (pcenter - c).length() < 18.0;
+                }
+            }
         }
         let (swing, shake_tool) = tools::update(
             &mut self.tool,
@@ -1259,6 +1299,40 @@ impl App for GameApp {
                     self.action.current = None;
                     self.hint = ("已切换单向平台工具（按 9 亦可）——放置后从上方可站立，按 S 下落穿透".to_string(), 2.5);
                 }
+                LabReq::SelectBuildTool
+                | LabReq::SetBuildWall
+                | LabReq::SetBuildDoor
+                | LabReq::SetBuildWorkbench
+                | LabReq::SetBuildBed => {
+                    use mge_world::pieces::PieceKind;
+                    if req == LabReq::SelectBuildTool {
+                        self.tool.tool = tools::Tool::Build;
+                        self.action.current = None;
+                        self.hint = (
+                            format!(
+                                "建造工具（按 0 亦可）——当前：{}，左键放置/再点拆除",
+                                self.build_sel.name()
+                            ),
+                            2.5,
+                        );
+                    } else {
+                        self.build_sel = match req {
+                            LabReq::SetBuildWall => PieceKind::Wall,
+                            LabReq::SetBuildDoor => PieceKind::Door,
+                            LabReq::SetBuildWorkbench => PieceKind::Workbench,
+                            _ => PieceKind::Bed,
+                        };
+                        self.hint = (
+                            format!("已选建筑件：{}（左键放置，同位再点拆除）", self.build_sel.name()),
+                            2.0,
+                        );
+                    }
+                }
+                LabReq::ClearPieces => {
+                    let n = self.world.pieces.len();
+                    self.world.clear_pieces();
+                    self.hint = (format!("已清空 {n} 个建筑件"), 1.2);
+                }
                 LabReq::LearnFrostNova | LabReq::LearnVenomBurst => {
                     let id = match req {
                         LabReq::LearnFrostNova => "frost_nova",
@@ -1348,6 +1422,72 @@ impl App for GameApp {
             batch.push_at(Vec2::new(fx, fy - 2.5), Vec2::new(3.0, 7.0), torch_region, [1.0; 4]);
         }
 
+        // ---- 建筑件（木墙/门/工作台/床）----
+        let white = self.regions.get("white").unwrap();
+        for p in &self.world.pieces {
+            use mge_world::pieces::PieceKind;
+            let (w, h) = p.kind.size();
+            let pos = Vec2::new(p.x as f32 + w as f32 / 2.0, p.y as f32 + h as f32 / 2.0);
+            let size = Vec2::new(w as f32, h as f32);
+            match p.kind {
+                PieceKind::Wall => {
+                    batch.push_at(pos, size, white, [0.55, 0.38, 0.2, 1.0]);
+                    batch.push_at(pos, Vec2::new(w as f32 - 2.0, h as f32 - 2.0), white, [
+                        0.62, 0.44, 0.24, 1.0,
+                    ]);
+                }
+                PieceKind::Door => {
+                    if p.open {
+                        // 开门：靠边细条
+                        batch.push_at(
+                            Vec2::new(p.x as f32 + 1.0, p.y as f32 + h as f32 / 2.0),
+                            Vec2::new(1.5, h as f32),
+                            white,
+                            [0.45, 0.3, 0.15, 1.0],
+                        );
+                    } else {
+                        batch.push_at(pos, size, white, [0.45, 0.3, 0.15, 1.0]);
+                        batch.push_at(pos, Vec2::new(w as f32 - 2.0, h as f32 - 2.0), white, [
+                            0.55, 0.38, 0.2, 1.0,
+                        ]);
+                        // 门把手
+                        batch.push_at(
+                            pos + Vec2::new(self.player.facing * (w as f32 / 2.0 - 1.5), 0.0),
+                            Vec2::splat(1.2),
+                            white,
+                            [0.9, 0.8, 0.4, 1.0],
+                        );
+                    }
+                }
+                PieceKind::Workbench => {
+                    batch.push_at(pos, size, white, [0.5, 0.34, 0.18, 1.0]);
+                    // 台面
+                    batch.push_at(
+                        pos + Vec2::new(0.0, -h as f32 / 2.0 + 1.0),
+                        Vec2::new(w as f32, 1.5),
+                        white,
+                        [0.65, 0.46, 0.25, 1.0],
+                    );
+                }
+                PieceKind::Bed => {
+                    // 床架 + 垫子 + 枕头
+                    batch.push_at(pos, size, white, [0.45, 0.3, 0.16, 1.0]);
+                    batch.push_at(
+                        pos + Vec2::new(0.0, 1.0),
+                        Vec2::new(w as f32 - 2.0, h as f32 - 3.0),
+                        white,
+                        [0.85, 0.85, 0.8, 1.0],
+                    );
+                    batch.push_at(
+                        pos + Vec2::new(0.0, -h as f32 / 2.0 + 2.0),
+                        Vec2::new(w as f32 - 2.0, 3.0),
+                        white,
+                        [0.95, 0.95, 0.9, 1.0],
+                    );
+                }
+            }
+        }
+
         // ---- 放置预览：吸附到真实落点，绿=可放/红=不可放；范围圈提示够不够得着 ----
         if matches!(
             self.tool.tool,
@@ -1403,6 +1543,19 @@ impl App for GameApp {
                         Vec2::new(3.0, 7.0),
                         torch_region,
                         tint,
+                    );
+                }
+                Tool::Build => {
+                    // 建筑件虚影：绿=可放/红=不可放
+                    let (w, h) = self.build_sel.size();
+                    let (cx, cy) = (tools::snap2(m.x), tools::snap2(m.y));
+                    let (px, py) = (cx - w / 2, cy - h / 2);
+                    let ok = in_reach;
+                    batch.push_at(
+                        Vec2::new(px as f32 + w as f32 / 2.0, py as f32 + h as f32 / 2.0),
+                        Vec2::new(w as f32, h as f32),
+                        white,
+                        [0.6, 0.5, 0.3, if ok { 0.4 } else { 0.25 }],
                     );
                 }
                 Tool::Platform => {

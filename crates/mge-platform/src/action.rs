@@ -19,6 +19,7 @@ pub enum Action {
     Slot7,
     Slot8,
     Slot9,
+    Slot10,
     ToggleDebug,
     ToggleEditor,
     /// 系统设置菜单（ESC）
@@ -86,6 +87,7 @@ impl ActionMap {
         put(KeyCode::Digit7, Action::Slot7);
         put(KeyCode::Digit8, Action::Slot8);
         put(KeyCode::Digit9, Action::Slot9);
+        put(KeyCode::Digit0, Action::Slot10);
         put(KeyCode::F3, Action::ToggleDebug);
         put(KeyCode::F1, Action::ToggleEditor);
         put(KeyCode::Escape, Action::ToggleMenu);

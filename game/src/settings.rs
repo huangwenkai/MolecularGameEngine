@@ -119,6 +119,7 @@ pub fn action_name(a: Action) -> &'static str {
         Action::Slot7 => "slot7",
         Action::Slot8 => "slot8",
         Action::Slot9 => "slot9",
+        Action::Slot10 => "slot10",
         Action::ToggleDebug => "debug",
         Action::ToggleEditor => "editor",
         Action::ToggleMenu => "menu",
@@ -229,6 +230,7 @@ fn action_label(a: Action) -> &'static str {
         Action::Slot7 => "快捷 7 · 弓",
         Action::Slot8 => "快捷 8 · 火球",
         Action::Slot9 => "快捷 9 · 平台",
+        Action::Slot10 => "快捷 0 · 建造",
         Action::Inventory => "背包",
         Action::Potion => "喝药水",
         Action::ToggleMenu => "系统设置",
@@ -306,6 +308,18 @@ pub enum LabReq {
     LearnFrostNova,
     /// 免费习得毒爆
     LearnVenomBurst,
+    /// 切换到建造工具
+    SelectBuildTool,
+    /// 选建筑件：木墙
+    SetBuildWall,
+    /// 选建筑件：木门
+    SetBuildDoor,
+    /// 选建筑件：工作台
+    SetBuildWorkbench,
+    /// 选建筑件：木床
+    SetBuildBed,
+    /// 清空全部建筑件
+    ClearPieces,
 }
 
 #[derive(Default)]
@@ -510,7 +524,31 @@ impl SettingsUi {
                         self.lab_reqs.push(LabReq::LearnVenomBurst);
                     }
                 });
-                ui.small("新功能在此配测试按钮：毒抗怪物/毒法书/毒液瓶/单向平台/新技能，怪物生成在面前");
+                ui.heading("建造（建筑件）");
+                ui.separator();
+                ui.horizontal(|ui| {
+                    if ui.button("🔨 建造工具").clicked() {
+                        self.lab_reqs.push(LabReq::SelectBuildTool);
+                    }
+                    if ui.button("🧱 木墙").clicked() {
+                        self.lab_reqs.push(LabReq::SetBuildWall);
+                    }
+                    if ui.button("🚪 木门").clicked() {
+                        self.lab_reqs.push(LabReq::SetBuildDoor);
+                    }
+                });
+                ui.horizontal(|ui| {
+                    if ui.button("🛠️ 工作台").clicked() {
+                        self.lab_reqs.push(LabReq::SetBuildWorkbench);
+                    }
+                    if ui.button("🛏️ 木床").clicked() {
+                        self.lab_reqs.push(LabReq::SetBuildBed);
+                    }
+                    if ui.button("🧹 清空建筑").clicked() {
+                        self.lab_reqs.push(LabReq::ClearPieces);
+                    }
+                });
+                ui.small("新功能在此配测试按钮：毒抗怪物/毒法书/毒液瓶/单向平台/新技能/建筑件，怪物生成在面前");
                 ui.add_space(6.0);
                     }); // columns
                 }); // ScrollArea

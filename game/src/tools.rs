@@ -23,6 +23,8 @@ pub enum Tool {
     Fireball,
     /// 单向平台（放置）
     Platform,
+    /// 建造（放置建筑件：木墙/门/工作台/床）
+    Build,
 }
 
 impl Tool {
@@ -38,6 +40,7 @@ impl Tool {
             Tool::Bow => "弓",
             Tool::Fireball => "火球法杖",
             Tool::Platform => "单向平台",
+            Tool::Build => "建造",
         }
     }
 }
@@ -94,6 +97,7 @@ impl Tool {
             6 => Tool::Sand,
             7 => Tool::Bow,
             9 => Tool::Platform,
+            10 => Tool::Build,
             _ => Tool::Fireball,
         }
     }
