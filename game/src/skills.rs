@@ -499,6 +499,13 @@ pub fn draw_hud(app: &GameApp, ctx: &egui::Context) {
                         format!("🧪 淬毒 {:.1}s", app.player.poison_buff),
                     );
                 }
+                // 进行中的任务
+                if let Some(q) = &app.quest {
+                    ui.colored_label(
+                        egui::Color32::YELLOW,
+                        format!("⚠ {} ({}/{})", q.name, q.progress, q.goal),
+                    );
+                }
             });
         });
 }

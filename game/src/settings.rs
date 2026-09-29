@@ -327,6 +327,8 @@ pub enum LabReq {
     SelectHoe,
     /// 发 10 包麦种
     GiveSeeds,
+    /// 开关世界历史窗口
+    ToggleHistory,
 }
 
 #[derive(Default)]
@@ -567,7 +569,10 @@ impl SettingsUi {
                     }
                 });
                 ui.small("农具用法：点草/泥土=耕地 → 点耕地=播种(耗麦种) → 40s 后再点=收获");
-                ui.small("新功能在此配测试按钮：毒抗怪物/毒法书/毒液瓶/单向平台/新技能/建筑件/农业，怪物生成在面前");
+                if ui.button("📜 世界历史").clicked() {
+                    self.lab_reqs.push(LabReq::ToggleHistory);
+                }
+                ui.small("新功能在此配测试按钮：毒抗怪物/毒法书/毒液瓶/单向平台/新技能/建筑件/农业/历史，怪物生成在面前");
                 ui.add_space(6.0);
                     }); // columns
                 }); // ScrollArea

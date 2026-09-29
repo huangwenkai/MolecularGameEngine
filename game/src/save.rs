@@ -19,10 +19,33 @@ struct Meta {
     /// 农作物（M21/S1-6 新增；serde(default) 兼容旧存档）
     #[serde(default)]
     crops: Vec<crate::farm::Crop>,
+    /// NPC（M22/S1-11 新增；serde(default) 兼容旧存档）
+    #[serde(default)]
+    npcs: Vec<NpcSave>,
+    /// 村庄声望 / 天数 / 世界历史
+    #[serde(default)]
+    village_rep: i32,
+    #[serde(default)]
+    day: u32,
+    #[serde(default)]
+    events: Vec<(u32, String)>,
     /// 技能（M17 新增；serde(default) 兼容旧存档）
     #[serde(default)]
     skills: crate::skills::SkillSave,
 }
+
+#[derive(Serialize, Deserialize)]
+struct NpcSave {
+    x: f32,
+    y: f32,
+    home_x: f32,
+    home_y: f32,
+    prof: u8,
+    name: String,
+    rel: i8,
+    memories: Vec<String>,
+}
+
 
 #[derive(Serialize, Deserialize)]
 struct PlayerData {
@@ -95,6 +118,24 @@ pub fn save_game(app: &mut GameApp) -> std::io::Result<()> {
         torches: app.world.torches.clone(),
         pieces: app.world.pieces.clone(),
         crops: app.crops.clone(),
+        npcs: app
+            .npcs
+            .list
+            .iter()
+            .map(|n| NpcSave {
+                x: n.pos.x,
+                y: n.pos.y,
+                home_x: n.home.x,
+                home_y: n.home.y,
+                prof: n.prof,
+                name: n.name.clone(),
+                rel: n.rel,
+                memories: n.memories.clone(),
+            })
+            .collect(),
+        village_rep: app.village_rep,
+        day: app.day,
+        events: app.events.clone(),
         skills: crate::skills::SkillSave {
             pts: app.skills.pts,
             learned: app.skills.learned.clone(),
@@ -166,6 +207,31 @@ pub fn load_game(app: &mut GameApp) -> std::io::Result<()> {
     app.world.torches = meta.torches;
     app.world.pieces = meta.pieces;
     app.crops = meta.crops;
+    // NPC：按存档恢复（职业/名字/关系/记忆/住宅）
+    app.npcs.list = meta
+        .npcs
+        .iter()
+        .map(|s| crate::npc::Npc {
+            pos: Vec2::new(s.x, s.y),
+            vel: Vec2::ZERO,
+            hunger: 20.0,
+            thirst: 20.0,
+            fatigue: 10.0,
+            state: crate::npc::NpcState::Idle,
+            state_t: 0,
+            target: Vec2::new(s.home_x, s.home_y),
+            home: Vec2::new(s.home_x, s.home_y),
+            face: 1.0,
+            anim: 0.0,
+            prof: s.prof,
+            name: s.name.clone(),
+            rel: s.rel,
+            memories: s.memories.clone(),
+        })
+        .collect();
+    app.village_rep = meta.village_rep;
+    app.day = meta.day;
+    app.events = meta.events;
     app.skills.pts = meta.skills.pts;
     // learned 兼容旧存档（技能数演进）：对齐到当前技能定义数量
     app.skills.resize_to_defs();

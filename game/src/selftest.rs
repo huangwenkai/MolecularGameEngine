@@ -501,7 +501,8 @@ pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
                         );
                     }
                 }
-                game.npcs.list[1].pos = Vec2::new(x1 as f32 - 10.0, sy1 as f32);
+                game.npcs.list[1].pos =
+                    Vec2::new((x1 - 7) as f32, game.surface_y(x1 - 7) as f32);
                 game.npcs.list[1].thirst = 45.0;
                 game.npcs.list[1].hunger = 0.0;
                 game.npcs.list[1].fatigue = 0.0;

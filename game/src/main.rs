@@ -14,6 +14,7 @@ mod inventory;
 mod items;
 mod monsters;
 mod farm;
+mod village;
 mod npc;
 mod player;
 mod projectiles;
@@ -87,6 +88,16 @@ pub struct GameApp {
     pub shop_open: Option<usize>,
     /// 村庄声望（-100~100，事件/守村/交易影响）
     pub village_rep: i32,
+    /// 世界历史（天数 + 事件描述）
+    pub events: Vec<(u32, String)>,
+    /// 世界天数
+    pub day: u32,
+    /// 进行中的哥布林袭击（剩余需击杀数）
+    pub raid: Option<u32>,
+    /// 进行中的任务
+    pub quest: Option<village::Quest>,
+    /// 世界历史窗口
+    pub history_open: bool,
     pub audio: audio::Audio,
     /// 系统设置（音量/震动/键位，持久化于 saves/settings.ron）
     pub settings: settings::Settings,
@@ -182,6 +193,11 @@ impl GameApp {
             crops: Vec::new(),
             shop_open: None,
             village_rep: 0,
+            events: Vec::new(),
+            day: 1,
+            raid: None,
+            quest: None,
+            history_open: false,
             audio,
             settings,
             veg,
@@ -1105,7 +1121,15 @@ impl App for GameApp {
 
         // ---- 世界与实体 ----
         self.world.time_frozen = self.settings.time_lock;
+        let prev_time = self.world.time;
         self.world.update();
+        // 黎明跨天
+        if self.world.time < prev_time {
+            self.day += 1;
+            village::log_event(self, format!("新的一天开始了（第 {} 天）", self.day));
+        }
+        // 夜晚随机哥布林袭击
+        village::try_raid(self);
         let deaths = entities::update(&mut self.ecs, &mut self.world, &mut self.rng);
         for d in deaths {
             let _ = self.vfx.spawn(&fx.death, d, 1.0, &mut self.rng);
@@ -1196,6 +1220,11 @@ impl App for GameApp {
             self.player.vel += mknock / 60.0;
             ctx.camera.add_shake(4.0);
             self.audio.play(audio::Sfx::Hurt);
+        }
+        // ---- 袭击任务进度 ----
+        let raid_kills = mdeaths.len() as u32;
+        if raid_kills > 0 {
+            village::on_monster_killed(self, raid_kills);
         }
         for (mpos, mxp, table) in mdeaths {
             let _ = self.vfx.spawn(&fx.death, mpos, 1.0, &mut self.rng);
@@ -1334,6 +1363,34 @@ impl App for GameApp {
                 inventory::draw(self, egui);
                 skills::draw_window(self, egui);
                 skills::draw_hud(self, egui);
+                // ---- 世界历史窗口 ----
+                if self.history_open {
+                    let pop = village::population(self);
+                    let safety = village::safety(self);
+                    let rep = self.village_rep;
+                    let events = self.events.clone();
+                    egui::Window::new("📜 世界历史")
+                        .default_width(340.0)
+                        .show(egui, |ui| {
+                            ui.label(format!(
+                                "青石村：人口 {pop} · 安全度 {safety} · 声望 {rep}"
+                            ));
+                            ui.separator();
+                            egui::ScrollArea::vertical()
+                                .max_height(360.0)
+                                .show(ui, |ui| {
+                                    if events.is_empty() {
+                                        ui.small("（尚无事件记录）");
+                                    }
+                                    for (day, desc) in events.iter().rev() {
+                                        ui.small(format!("第 {day} 天 · {desc}"));
+                                    }
+                                });
+                            if ui.button("清空历史").clicked() {
+                                self.events.clear();
+                            }
+                        });
+                }
                 // ---- 商店窗口（靠近商人按 E 打开）----
                 let shop_npc = self.shop_open.and_then(|i| {
                     self.npcs
@@ -1503,6 +1560,9 @@ impl App for GameApp {
                     } else {
                         self.hint = ("背包已满，添加失败".to_string(), 1.5);
                     }
+                }
+                LabReq::ToggleHistory => {
+                    self.history_open = !self.history_open;
                 }
                 LabReq::LearnFrostNova | LabReq::LearnVenomBurst => {
                     let id = match req {
