@@ -395,7 +395,7 @@ pub fn update(p: &mut Player, input: &InputState, world: &mut World, rng: &mut R
         move_axis_x(world, &mut p.pos, p.half, p.vel.x * dt, p.on_ground);
     }
     let dy = p.vel.y * dt;
-    let (hit_solid, hit_platform) = move_axis_y(world, &mut p.pos, p.half, dy, drop && !p.on_ground);
+    let (hit_solid, hit_platform) = move_axis_y(world, &mut p.pos, p.half, dy, drop);
     if hit_solid || hit_platform {
         if p.vel.y > 0.0 {
             // 落地

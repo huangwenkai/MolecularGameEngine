@@ -21,6 +21,8 @@ pub enum Tool {
     Bow,
     /// 火球法杖
     Fireball,
+    /// 单向平台（放置）
+    Platform,
 }
 
 impl Tool {
@@ -35,6 +37,7 @@ impl Tool {
             Tool::Sand => "沙",
             Tool::Bow => "弓",
             Tool::Fireball => "火球法杖",
+            Tool::Platform => "单向平台",
         }
     }
 }
@@ -90,6 +93,7 @@ impl Tool {
             5 => Tool::Water,
             6 => Tool::Sand,
             7 => Tool::Bow,
+            9 => Tool::Platform,
             _ => Tool::Fireball,
         }
     }
@@ -101,11 +105,19 @@ pub struct ToolCtx {
     pub scoop_cooldown: u8,
     /// 本帧攻击被法器法术接管（如闪电魔法书）：剑不挥砍
     pub tome_cast: bool,
+    /// 挖矿经验累积（每破坏 5 像素 = 1 点经验；主循环定期结算入角色）
+    pub mine_xp_acc: f32,
 }
 
 impl Default for ToolCtx {
     fn default() -> Self {
-        Self { tool: Tool::Sword, place_cooldown: 0, scoop_cooldown: 0, tome_cast: false }
+        Self {
+            tool: Tool::Sword,
+            place_cooldown: 0,
+            scoop_cooldown: 0,
+            tome_cast: false,
+            mine_xp_acc: 0.0,
+        }
     }
 }
 
@@ -159,6 +171,8 @@ pub fn update(
                     }
                 }
             }
+            // 挖矿经验：每破坏 5 像素 = 1 点经验（主循环结算入角色）
+            t.mine_xp_acc += breaks as f32 * 0.2;
             t.place_cooldown = 8; // 按住循环触发间隔
             if breaks > 0 {
                 shake = 0.5;
@@ -202,6 +216,24 @@ pub fn update(
         Tool::Torch if in_reach && input.pressed(Action::Attack) => {
             if t.place_cooldown == 0 && world.place_torch(cx, cy) {
                 t.place_cooldown = 8;
+            }
+        }
+        Tool::Platform if in_reach && input.pressed(Action::Attack) => {
+            if t.place_cooldown == 0 {
+                // 放置 8×1 单向平台（2px 吸附；可从下方穿过、自上方站立，按 S 可下落穿透）
+                let mat = world.mats.id("platform").unwrap_or(0);
+                let mut placed = false;
+                for dx in -4..4 {
+                    let (tx, ty) = (cx + dx, cy);
+                    if world.pixels.get(tx, ty).mat == 0 {
+                        world.pixels.spawn(tx, ty, mat, &world.mats);
+                        placed = true;
+                    }
+                }
+                if placed {
+                    world.mark_terrain_dirty();
+                    t.place_cooldown = 4;
+                }
             }
         }
         Tool::Water | Tool::Sand if in_reach && input.pressed(Action::Attack) && t.place_cooldown == 0 => {

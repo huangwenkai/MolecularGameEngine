@@ -118,6 +118,7 @@ pub fn action_name(a: Action) -> &'static str {
         Action::Slot6 => "slot6",
         Action::Slot7 => "slot7",
         Action::Slot8 => "slot8",
+        Action::Slot9 => "slot9",
         Action::ToggleDebug => "debug",
         Action::ToggleEditor => "editor",
         Action::ToggleMenu => "menu",
@@ -221,6 +222,7 @@ fn action_label(a: Action) -> &'static str {
         Action::Slot6 => "快捷 6 · 沙",
         Action::Slot7 => "快捷 7 · 弓",
         Action::Slot8 => "快捷 8 · 火球",
+        Action::Slot9 => "快捷 9 · 平台",
         Action::Inventory => "背包",
         Action::Potion => "喝药水",
         Action::ToggleMenu => "系统设置",
@@ -290,6 +292,8 @@ pub enum LabReq {
     GivePoisonVial,
     /// 清空全部怪物
     ClearMonsters,
+    /// 切换到单向平台工具
+    SelectPlatformTool,
 }
 
 #[derive(Default)]
@@ -481,7 +485,10 @@ impl SettingsUi {
                 if ui.button("🧴 毒液瓶(淬毒材料)").clicked() {
                     self.lab_reqs.push(LabReq::GivePoisonVial);
                 }
-                ui.small("新功能在此配测试按钮：毒抗怪物/毒法书/毒液瓶，怪物生成在面前");
+                if ui.button("🪜 单向平台工具").clicked() {
+                    self.lab_reqs.push(LabReq::SelectPlatformTool);
+                }
+                ui.small("新功能在此配测试按钮：毒抗怪物/毒法书/毒液瓶/单向平台，怪物生成在面前");
                 ui.add_space(6.0);
                     }); // columns
                 }); // ScrollArea

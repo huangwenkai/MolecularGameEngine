@@ -614,6 +614,7 @@ impl App for GameApp {
             (Action::Slot6, Tool::Sand),
             (Action::Slot7, Tool::Bow),
             (Action::Slot8, Tool::Fireball),
+            (Action::Slot9, Tool::Platform),
         ] {
             if ctx.input.just_pressed(slot) {
                 self.tool.tool = tool;
@@ -802,6 +803,16 @@ impl App for GameApp {
             self.mouse_world,
             busy,
         );
+        // 挖矿经验结算（每破坏 5 像素 = 1 点；升级时提示）
+        let mine_xp = self.tool.mine_xp_acc;
+        if mine_xp >= 1.0 {
+            self.tool.mine_xp_acc -= mine_xp;
+            let ups = self.inv.gain_xp(mine_xp as u32);
+            if ups > 0 {
+                self.hint = (format!("挖矿升级！获得 {} 属性点", ups * 3), 1.8);
+                self.audio.play(audio::Sfx::LevelUp);
+            }
+        }
         let (active_started, _finished) =
             self.action.update(&self.actions, swing, st.atk_speed().clamp(0.3, 3.0));
         if active_started && self.action.phase == actions::Phase::Active {
@@ -1233,6 +1244,11 @@ impl App for GameApp {
                     self.monsters.list.clear();
                     self.hint = ("已清空全部怪物".to_string(), 1.2);
                 }
+                LabReq::SelectPlatformTool => {
+                    self.tool.tool = tools::Tool::Platform;
+                    self.action.current = None;
+                    self.hint = ("已切换单向平台工具（按 9 亦可）——放置后从上方可站立，按 S 下落穿透".to_string(), 2.5);
+                }
                 LabReq::GivePoisonTome | LabReq::GiveLightningTome | LabReq::GivePoisonVial => {
                     let def = match req {
                         LabReq::GivePoisonTome => "tome_poison",
@@ -1309,7 +1325,10 @@ impl App for GameApp {
         }
 
         // ---- 放置预览：吸附到真实落点，绿=可放/红=不可放；范围圈提示够不够得着 ----
-        if matches!(self.tool.tool, Tool::Block | Tool::Torch | Tool::Water | Tool::Sand) {
+        if matches!(
+            self.tool.tool,
+            Tool::Block | Tool::Torch | Tool::Water | Tool::Sand | Tool::Platform
+        ) {
             let white = self.regions.get("white").unwrap();
             let m = self.mouse_world;
             let in_reach = (m - self.player.pos).length() <= tools::REACH;
@@ -1360,6 +1379,18 @@ impl App for GameApp {
                         Vec2::new(3.0, 7.0),
                         torch_region,
                         tint,
+                    );
+                }
+                Tool::Platform => {
+                    // 平台预览：8×1 木色横条（绿=可放/红=不可放）
+                    let (cx, cy) = (tools::snap2(m.x), tools::snap2(m.y));
+                    let ok = in_reach;
+                    let (r, g, b) = if ok { (0.6, 0.45, 0.25) } else { (1.0, 0.35, 0.35) };
+                    batch.push_at(
+                        Vec2::new(cx as f32, cy as f32),
+                        Vec2::new(8.0, 1.0),
+                        white,
+                        [r, g, b, if ok { 0.55 } else { 0.45 }],
                     );
                 }
                 _ => {
