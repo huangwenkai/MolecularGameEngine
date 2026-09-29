@@ -113,6 +113,42 @@ impl Elite {
     }
 }
 
+/// 状态效果类型（元素战斗，M19）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StatusKind {
+    /// 燃烧：每 0.5s 结算 3 点火焰伤害
+    Burn,
+    /// 中毒：每 0.8s 结算 2 点毒素伤害
+    Poison,
+    /// 冰冻：移速 ×0.45（无 DoT）
+    Frozen,
+}
+
+/// 一次施加的状态（剩余时长 + DoT 结算计时）
+#[derive(Debug, Clone)]
+pub struct Status {
+    pub kind: StatusKind,
+    pub dur: f32,
+    tick: f32,
+}
+
+impl Status {
+    fn tick_interval(kind: StatusKind) -> f32 {
+        match kind {
+            StatusKind::Burn => 0.5,
+            StatusKind::Poison => 0.8,
+            StatusKind::Frozen => f32::INFINITY,
+        }
+    }
+    fn tick_damage(kind: StatusKind) -> f32 {
+        match kind {
+            StatusKind::Burn => 3.0,
+            StatusKind::Poison => 2.0,
+            StatusKind::Frozen => 0.0,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct Monster {
     pub kind: Kind,
@@ -143,6 +179,17 @@ pub struct Monster {
     pub path_cd: f32,
     /// 攻击动画剩余时间（接触伤害/发射弹丸时置位）
     pub attack_anim: f32,
+    /// 当前状态效果（燃烧/中毒/冰冻…）
+    pub statuses: Vec<Status>,
+}
+
+/// 施加/刷新状态（同类取剩余时间最长）
+fn inflict(m: &mut Monster, kind: StatusKind, dur: f32) {
+    if let Some(s) = m.statuses.iter_mut().find(|s| s.kind == kind) {
+        s.dur = s.dur.max(dur);
+    } else {
+        m.statuses.push(Status { kind, dur, tick: Status::tick_interval(kind) });
+    }
 }
 
 impl Monster {
@@ -228,6 +275,7 @@ impl Monsters {
             path_i: 0,
             path_cd: 0.0,
             attack_anim: 0.0,
+            statuses: Vec::new(),
         });
         if kind == Kind::Boss {
             self.boss_alive = true;
@@ -345,6 +393,52 @@ impl Monsters {
             m.flash = (m.flash - 1.0 / 60.0).max(0.0);
             m.atk_cd = (m.atk_cd - 1.0 / 60.0).max(0.0);
             m.anim += 1.0 / 60.0;
+
+            // ---- 状态效果：DoT 结算 + 伴随视觉 ----
+            m.statuses.retain_mut(|s| {
+                s.dur -= 1.0 / 60.0;
+                if s.dur <= 0.0 {
+                    return false;
+                }
+                s.tick -= 1.0 / 60.0;
+                if s.tick <= 0.0 {
+                    s.tick += Status::tick_interval(s.kind);
+                    m.hp -= Status::tick_damage(s.kind);
+                }
+                match s.kind {
+                    StatusKind::Burn => {
+                        if rng.chance(0.3) {
+                            vfx.dot(
+                                m.pos - Vec2::new(0.0, m.half.y)
+                                    + Vec2::new(rng.range_f32(-4.0, 4.0), rng.range_f32(0.0, 8.0)),
+                                Vec2::new(rng.range_f32(-15.0, 15.0), -55.0),
+                                0.35,
+                                2.0,
+                                [1.0, 0.5, 0.1],
+                                -50.0,
+                                true,
+                            );
+                        }
+                    }
+                    StatusKind::Poison => {
+                        if rng.chance(0.15) {
+                            vfx.dot(
+                                m.pos - Vec2::new(0.0, m.half.y)
+                                    + Vec2::new(rng.range_f32(-4.0, 4.0), rng.range_f32(0.0, 6.0)),
+                                Vec2::new(0.0, -30.0),
+                                0.4,
+                                1.8,
+                                [0.35, 0.9, 0.3],
+                                -30.0,
+                                true,
+                            );
+                        }
+                    }
+                    StatusKind::Frozen => {}
+                }
+                true
+            });
+
             let to_p = pcenter - (m.pos - Vec2::new(0.0, m.half.y));
             let dist = to_p.length();
             let sight = if m.kind == Kind::Slime || m.kind == Kind::DemonMushroom { 240.0 } else { 320.0 };
@@ -358,9 +452,14 @@ impl Monsters {
                 AiState::Patrol
             };
 
-            // ---- 精英狂暴：低血加成 ----
+            // ---- 精英狂暴：低血加成；冰冻减速 ----
             let rage = m.elite == Some(Elite::Berserk) && m.hp < m.max_hp * 0.4;
-            let spd = m.speed * if rage { 1.5 } else { 1.0 };
+            let frozen_slow = if m.statuses.iter().any(|s| s.kind == StatusKind::Frozen) {
+                0.45
+            } else {
+                1.0
+            };
+            let spd = m.speed * if rage { 1.5 } else { 1.0 } * frozen_slow;
 
             // ---- A* 导航：地面怪追击/撤退时周期性重算路径 ----
             m.path_cd -= 1.0 / 60.0;
@@ -660,6 +759,36 @@ impl Monsters {
         None
     }
 
+    /// 给命中点的怪物施加状态（投射物/法术用）；返回是否命中
+    pub fn apply_status_at(&mut self, pos: Vec2, kind: StatusKind, dur: f32) -> bool {
+        for m in self.list.iter_mut() {
+            let ma = Aabb::new(m.pos - Vec2::new(0.0, m.half.y) - m.half, m.half * 2.0);
+            if ma.min.x <= pos.x && pos.x <= ma.max.x && ma.min.y <= pos.y && pos.y <= ma.max.y {
+                inflict(m, kind, dur);
+                return true;
+            }
+        }
+        false
+    }
+
+    /// 对区域内所有怪物施加状态；返回受影响数量
+    pub fn apply_status_area(
+        &mut self,
+        center: Vec2,
+        radius: f32,
+        kind: StatusKind,
+        dur: f32,
+    ) -> u32 {
+        let mut n = 0;
+        for m in self.list.iter_mut() {
+            if (m.pos - center).length() <= radius {
+                inflict(m, kind, dur);
+                n += 1;
+            }
+        }
+        n
+    }
+
     /// 掉落表名（精英/BOSS 更丰厚）
     pub fn loot_table(m: &Monster) -> &'static str {
         if m.boss {
@@ -720,6 +849,12 @@ impl Monsters {
             }
             if m.flash > 0.0 {
                 col = [3.0, 1.5, 1.5, 1.0];
+            }
+            // 状态染色：冰冻偏蓝 / 中毒偏绿
+            if m.statuses.iter().any(|s| s.kind == StatusKind::Frozen) {
+                col = [col[0] * 0.45, col[1] * 0.7, (col[2] * 0.9 + 0.6).min(1.0), col[3]];
+            } else if m.statuses.iter().any(|s| s.kind == StatusKind::Poison) {
+                col = [col[0] * 0.6, (col[1] * 0.8 + 0.35).min(1.0), col[2] * 0.55, col[3]];
             }
             let bob = if m.kind.flies() {
                 (m.anim * 6.0).sin() * 2.0

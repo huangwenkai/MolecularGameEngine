@@ -914,6 +914,10 @@ impl App for GameApp {
             self.vfx.text(pos + Vec2::new(0.0, -14.0), dmg as u32, crit);
             if kind == projectiles::ProjKind::Fireball {
                 self.world.explode(pos.x as i32, pos.y as i32, 7);
+                // 火焰元素：直击点燃 3s，爆炸波及范围点燃 2.5s
+                self.monsters.apply_status_at(pos, monsters::StatusKind::Burn, 3.0);
+                self.monsters
+                    .apply_status_area(pos, 40.0, monsters::StatusKind::Burn, 2.5);
                 let (_, hs) = self.vfx.spawn(&fx.explosion, pos, 1.0, &mut self.rng);
                 self.hitstop = self.hitstop.max(hs);
                 ctx.camera.add_shake(8.0);
@@ -1383,7 +1387,7 @@ fn main() {
     if args.iter().any(|a| a == "--selftest") {
         tracing::info!("自测模式启动");
         let mut app = GameApp::new(2026_0924, true);
-        engine.run_headless(&mut app, 1350);
+        engine.run_headless(&mut app, 1420);
         tracing::info!("自测完成");
     } else {
         let seed = std::time::SystemTime::now()

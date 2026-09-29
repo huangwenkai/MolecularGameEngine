@@ -993,6 +993,36 @@ pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
                 game.world.pixels.active_pixels,
             );
         }
+        // ---- M19：状态效果（燃烧 DoT / 冰冻减速 / 中毒）----
+        1360 => {
+            // 清场后生成一只骷髅士兵，记录血量并点燃 + 冰冻
+            game.monsters.list.clear();
+            let px = game.player.pos.x as i32;
+            let sy = game.surface_y(px + 80) as f32;
+            game.monsters.test_spawn(
+                crate::monsters::Kind::SkeletonSoldier,
+                Vec2::new((px + 80) as f32, sy),
+                &mut game.rng,
+            );
+            game.monsters
+                .apply_status_at(Vec2::new((px + 80) as f32, sy), crate::monsters::StatusKind::Burn, 3.0);
+            game.monsters
+                .apply_status_at(Vec2::new((px + 80) as f32, sy), crate::monsters::StatusKind::Frozen, 3.0);
+        }
+        1400 => {
+            // ~0.67s 后：燃烧至少结算 1 跳（-3 血）+ 冰冻在场
+            let m = game.monsters.list.first();
+            let burned = m.map(|m| m.hp < m.max_hp - 2.5).unwrap_or(false);
+            let frozen = m
+                .map(|m| m.statuses.iter().any(|s| s.kind == crate::monsters::StatusKind::Frozen))
+                .unwrap_or(false);
+            println!(
+                "[SELFTEST] 状态效果 {} | 燃烧DoT {burned} 冰冻在场 {frozen} 剩余血 {:.1}/{:.1}",
+                if burned && frozen { "PASS" } else { "FAIL" },
+                m.map(|m| m.hp).unwrap_or(0.0),
+                m.map(|m| m.max_hp).unwrap_or(0.0),
+            );
+        }
         _ => {}
     }
 }
