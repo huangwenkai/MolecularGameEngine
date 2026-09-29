@@ -181,10 +181,29 @@ pub struct Monster {
     pub attack_anim: f32,
     /// 当前状态效果（燃烧/中毒/冰冻…）
     pub statuses: Vec<Status>,
+    /// 元素抗性（0~1，削减对应状态时长与 DoT 伤害）：火/毒/冰
+    pub res_fire: f32,
+    pub res_poison: f32,
+    pub res_ice: f32,
 }
 
-/// 施加/刷新状态（同类取剩余时间最长）
+impl Monster {
+    /// 按状态类型取抗性
+    pub fn res_of(&self, kind: StatusKind) -> f32 {
+        match kind {
+            StatusKind::Burn => self.res_fire,
+            StatusKind::Poison => self.res_poison,
+            StatusKind::Frozen => self.res_ice,
+        }
+    }
+}
+
+/// 施加/刷新状态（同类取剩余时间最长；时长按抗性削减）
 fn inflict(m: &mut Monster, kind: StatusKind, dur: f32) {
+    let dur = dur * (1.0 - m.res_of(kind)).clamp(0.0, 1.0);
+    if dur <= 0.0 {
+        return;
+    }
     if let Some(s) = m.statuses.iter_mut().find(|s| s.kind == kind) {
         s.dur = s.dur.max(dur);
     } else {
@@ -250,6 +269,14 @@ impl Monsters {
             Some(Elite::Berserk) => (hp * 1.2, dmg * 1.3, speed),
             None => (hp, dmg, speed),
         };
+        // 元素抗性（0~1）：魔化蘑菇耐火、史莱姆毒抗极高、亡灵毒抗高、Boss 全抗
+        let (res_fire, res_poison, res_ice) = match kind {
+            Kind::Slime => (0.0, 0.8, 0.0),
+            Kind::DemonMushroom => (0.6, 0.2, 0.0),
+            Kind::SkeletonSoldier => (0.0, 0.5, 0.2),
+            Kind::Boss => (0.3, 0.3, 0.3),
+            _ => (0.0, 0.0, 0.0),
+        };
         self.list.push(Monster {
             kind,
             pos,
@@ -276,6 +303,9 @@ impl Monsters {
             path_cd: 0.0,
             attack_anim: 0.0,
             statuses: Vec::new(),
+            res_fire,
+            res_poison,
+            res_ice,
         });
         if kind == Kind::Boss {
             self.boss_alive = true;
@@ -395,7 +425,13 @@ impl Monsters {
             m.anim += 1.0 / 60.0;
 
             // ---- 状态效果：DoT 结算 + 伴随视觉 ----
+            let (r_fire, r_poison, r_ice) = (m.res_fire, m.res_poison, m.res_ice);
             m.statuses.retain_mut(|s| {
+                let res = match s.kind {
+                    StatusKind::Burn => r_fire,
+                    StatusKind::Poison => r_poison,
+                    StatusKind::Frozen => r_ice,
+                };
                 s.dur -= 1.0 / 60.0;
                 if s.dur <= 0.0 {
                     return false;
@@ -403,7 +439,7 @@ impl Monsters {
                 s.tick -= 1.0 / 60.0;
                 if s.tick <= 0.0 {
                     s.tick += Status::tick_interval(s.kind);
-                    m.hp -= Status::tick_damage(s.kind);
+                    m.hp -= Status::tick_damage(s.kind) * (1.0 - res);
                 }
                 match s.kind {
                     StatusKind::Burn => {

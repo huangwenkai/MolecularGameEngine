@@ -358,6 +358,13 @@ pub fn draw_hud(app: &GameApp, ctx: &egui::Context) {
                     };
                     ui.colored_label(color, txt);
                 }
+                // 武器淬毒状态
+                if app.player.poison_buff > 0.0 {
+                    ui.colored_label(
+                        egui::Color32::from_rgb(120, 220, 110),
+                        format!("🧪 淬毒 {:.1}s", app.player.poison_buff),
+                    );
+                }
             });
         });
 }

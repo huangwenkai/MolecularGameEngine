@@ -1023,6 +1023,51 @@ pub fn drive(game: &mut GameApp, ctx: &mut EngineCtx) {
                 m.map(|m| m.max_hp).unwrap_or(0.0),
             );
         }
+        1420 => {
+            // M19：抗性削减——骷髅(毒抗0.5) vs 史莱姆(毒抗0.8)，施加 3s 中毒后时长应分别为 1.5s / 0.6s
+            use crate::monsters::StatusKind;
+            let px = game.player.pos.x as i32;
+            game.monsters.list.clear();
+            let sy = game.surface_y(px + 80) as f32;
+            game.monsters.test_spawn(
+                crate::monsters::Kind::SkeletonSoldier,
+                Vec2::new((px + 80) as f32, sy),
+                &mut game.rng,
+            );
+            let sy2 = game.surface_y(px + 120) as f32;
+            game.monsters.test_spawn(
+                crate::monsters::Kind::Slime,
+                Vec2::new((px + 120) as f32, sy2),
+                &mut game.rng,
+            );
+            game.monsters
+                .apply_status_at(Vec2::new((px + 80) as f32, sy), StatusKind::Poison, 3.0);
+            game.monsters
+                .apply_status_at(Vec2::new((px + 120) as f32, sy2), StatusKind::Poison, 3.0);
+        }
+        1421 => {
+            use crate::monsters::StatusKind;
+            let get_dur = |game: &GameApp, k: crate::monsters::Kind| {
+                game.monsters
+                    .list
+                    .iter()
+                    .find(|m| m.kind == k)
+                    .and_then(|m| {
+                        m.statuses
+                            .iter()
+                            .find(|s| s.kind == StatusKind::Poison)
+                            .map(|s| s.dur)
+                    })
+                    .unwrap_or(-1.0)
+            };
+            let ske = get_dur(game, crate::monsters::Kind::SkeletonSoldier);
+            let slime = get_dur(game, crate::monsters::Kind::Slime);
+            let ok = (ske - 1.5).abs() < 0.05 && (slime - 0.6).abs() < 0.05;
+            println!(
+                "[SELFTEST] 元素抗性 {} | 骷髅毒时长 {ske:.2}s(期望1.5) 史莱姆 {slime:.2}s(期望0.6)",
+                if ok { "PASS" } else { "FAIL" },
+            );
+        }
         _ => {}
     }
 }

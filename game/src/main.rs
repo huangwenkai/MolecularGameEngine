@@ -567,6 +567,8 @@ impl App for GameApp {
         if self.hint.1 > 0.0 {
             self.hint.1 = (self.hint.1 - 1.0 / 60.0).max(0.0);
         }
+        // 淬毒衰减
+        self.player.poison_buff = (self.player.poison_buff - 1.0 / 60.0).max(0.0);
 
         // ---- 自测脚本（必须在输入消费之前注入）----
         if self.selftest {
@@ -822,6 +824,11 @@ impl App for GameApp {
                 self.hitstop = self.hitstop.max(hs);
                 self.vfx.text(*hp_pos + Vec2::new(0.0, -18.0), dmg as u32, crit);
                 ctx.camera.add_shake(if crit { 4.0 } else { 2.0 });
+                // 淬毒武器：近战命中附带中毒
+                if self.player.poison_buff > 0.0 {
+                    self.monsters
+                        .apply_status_at(*hp_pos, monsters::StatusKind::Poison, 3.0);
+                }
             }
             let mut query = self
                 .ecs
@@ -1387,7 +1394,7 @@ fn main() {
     if args.iter().any(|a| a == "--selftest") {
         tracing::info!("自测模式启动");
         let mut app = GameApp::new(2026_0924, true);
-        engine.run_headless(&mut app, 1420);
+        engine.run_headless(&mut app, 1440);
         tracing::info!("自测完成");
     } else {
         let seed = std::time::SystemTime::now()

@@ -435,7 +435,17 @@ pub fn draw(app: &mut GameApp, ctx: &egui::Context) {
             let def_id = app.inv.bag[idx].as_ref().map(|it| it.def.clone());
             if let Some(def_id) = def_id {
                 let d = app.db.def(&def_id);
-                if d.stack > 1 && d.hp > 0.0 {
+                if def_id == "vial_poison" {
+                    // 毒液瓶：武器淬毒（近战 10s 内附带中毒）
+                    if let Some(it) = &mut app.inv.bag[idx] {
+                        it.count -= 1;
+                        if it.count == 0 {
+                            app.inv.bag[idx] = None;
+                        }
+                    }
+                    app.player.poison_buff = 10.0;
+                    app.hint = ("武器淬毒！（近战附带中毒，持续 10s）".to_string(), 1.8);
+                } else if d.stack > 1 && d.hp > 0.0 {
                     let hp = &mut app.player.hp;
                     let max_hp = app.player.max_hp;
                     app.inv.use_potion(hp, max_hp, &app.db);

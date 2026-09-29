@@ -51,6 +51,8 @@ pub struct Player {
     pub invuln: f32,
     /// 施法姿态剩余时间（技能施放后短暂保持）
     pub casting: f32,
+    /// 武器淬毒剩余时间（毒液瓶使用后近战附带中毒）
+    pub poison_buff: f32,
 }
 
 impl Player {
@@ -81,6 +83,7 @@ impl Player {
             dodge_cd: 0.0,
             invuln: 0.0,
             casting: 0.0,
+            poison_buff: 0.0,
         }
     }
 
