@@ -320,6 +320,10 @@ pub enum LabReq {
     SetBuildBed,
     /// 清空全部建筑件
     ClearPieces,
+    /// 切换到农具
+    SelectHoe,
+    /// 发 10 包麦种
+    GiveSeeds,
 }
 
 #[derive(Default)]
@@ -548,7 +552,18 @@ impl SettingsUi {
                         self.lab_reqs.push(LabReq::ClearPieces);
                     }
                 });
-                ui.small("新功能在此配测试按钮：毒抗怪物/毒法书/毒液瓶/单向平台/新技能/建筑件，怪物生成在面前");
+                ui.heading("农业");
+                ui.separator();
+                ui.horizontal(|ui| {
+                    if ui.button("🌾 农具").clicked() {
+                        self.lab_reqs.push(LabReq::SelectHoe);
+                    }
+                    if ui.button("🌱 麦种×10").clicked() {
+                        self.lab_reqs.push(LabReq::GiveSeeds);
+                    }
+                });
+                ui.small("农具用法：点草/泥土=耕地 → 点耕地=播种(耗麦种) → 40s 后再点=收获");
+                ui.small("新功能在此配测试按钮：毒抗怪物/毒法书/毒液瓶/单向平台/新技能/建筑件/农业，怪物生成在面前");
                 ui.add_space(6.0);
                     }); // columns
                 }); // ScrollArea

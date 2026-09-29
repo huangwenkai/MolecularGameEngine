@@ -25,6 +25,8 @@ pub enum Tool {
     Platform,
     /// 建造（放置建筑件：木墙/门/工作台/床）
     Build,
+    /// 农具（耕地/播种/收获）
+    Hoe,
 }
 
 impl Tool {
@@ -41,6 +43,7 @@ impl Tool {
             Tool::Fireball => "火球法杖",
             Tool::Platform => "单向平台",
             Tool::Build => "建造",
+            Tool::Hoe => "农具",
         }
     }
 }

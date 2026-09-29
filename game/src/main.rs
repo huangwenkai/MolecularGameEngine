@@ -13,6 +13,7 @@ mod ide;
 mod inventory;
 mod items;
 mod monsters;
+mod farm;
 mod npc;
 mod player;
 mod projectiles;
@@ -80,6 +81,8 @@ pub struct GameApp {
     pub tome_cd: f32,
     /// 建造工具当前选中的建筑件
     pub build_sel: mge_world::pieces::PieceKind,
+    /// 农作物（耕地坐标 + 生长时间）
+    pub crops: Vec<farm::Crop>,
     pub audio: audio::Audio,
     /// 系统设置（音量/震动/键位，持久化于 saves/settings.ron）
     pub settings: settings::Settings,
@@ -172,6 +175,7 @@ impl GameApp {
             guide_t: 8.0,
             tome_cd: 0.0,
             build_sel: mge_world::pieces::PieceKind::Wall,
+            crops: Vec::new(),
             audio,
             settings,
             veg,
@@ -836,6 +840,8 @@ impl App for GameApp {
                 }
             }
         }
+        // ---- 农作物生长 ----
+        farm::update(self);
         let (swing, shake_tool) = tools::update(
             &mut self.tool,
             ctx.input,
@@ -853,6 +859,17 @@ impl App for GameApp {
             if ups > 0 {
                 self.hint = (format!("挖矿升级！获得 {} 属性点", ups * 3), 1.8);
                 self.audio.play(audio::Sfx::LevelUp);
+            }
+        }
+        // ---- 农具：耕地/播种/收获 ----
+        if matches!(self.tool.tool, Tool::Hoe)
+            && !busy
+            && ctx.input.pressed(Action::Attack)
+            && self.tool.place_cooldown == 0
+        {
+            if let Some(msg) = farm::use_hoe(self) {
+                self.tool.place_cooldown = 10;
+                self.hint = (msg.to_string(), 1.4);
             }
         }
         let (active_started, _finished) =
@@ -1333,6 +1350,21 @@ impl App for GameApp {
                     self.world.clear_pieces();
                     self.hint = (format!("已清空 {n} 个建筑件"), 1.2);
                 }
+                LabReq::SelectHoe => {
+                    self.tool.tool = tools::Tool::Hoe;
+                    self.action.current = None;
+                    self.hint = ("已切换农具——点草/泥土耕地，点耕地播种，成熟后收获".to_string(), 2.5);
+                }
+                LabReq::GiveSeeds => {
+                    if self.inv.add(
+                        items::Item { def: "seeds_wheat".into(), count: 10, affixes: Vec::new() },
+                        &self.db,
+                    ) {
+                        self.hint = ("已获得「麦种」×10".to_string(), 1.5);
+                    } else {
+                        self.hint = ("背包已满，添加失败".to_string(), 1.5);
+                    }
+                }
                 LabReq::LearnFrostNova | LabReq::LearnVenomBurst => {
                     let id = match req {
                         LabReq::LearnFrostNova => "frost_nova",
@@ -1484,6 +1516,35 @@ impl App for GameApp {
                         white,
                         [0.95, 0.95, 0.9, 1.0],
                     );
+                }
+            }
+        }
+
+        // ---- 农作物（茎 + 按阶段的叶/麦穗）----
+        for c in &self.crops {
+            let base = Vec2::new(c.x as f32 + 0.5, c.y as f32);
+            match c.stage() {
+                0 => batch.push_at(base - Vec2::new(0.0, 1.5), Vec2::new(1.2, 3.0), white, [
+                    0.4, 0.8, 0.3, 1.0,
+                ]),
+                1 => {
+                    batch.push_at(base - Vec2::new(0.0, 2.5), Vec2::new(1.2, 5.0), white, [
+                        0.35, 0.75, 0.25, 1.0,
+                    ]);
+                    batch.push_at(base - Vec2::new(0.0, 3.5), Vec2::new(3.5, 1.2), white, [
+                        0.4, 0.85, 0.3, 1.0,
+                    ]);
+                }
+                _ => {
+                    batch.push_at(base - Vec2::new(0.0, 3.0), Vec2::new(1.2, 6.0), white, [
+                        0.4, 0.75, 0.25, 1.0,
+                    ]);
+                    batch.push_at(base - Vec2::new(0.0, 6.5), Vec2::new(3.0, 3.0), white, [
+                        0.92, 0.82, 0.3, 1.0,
+                    ]);
+                    batch.push_at(base - Vec2::new(0.0, 4.0), Vec2::new(4.0, 1.2), white, [
+                        0.45, 0.85, 0.3, 1.0,
+                    ]);
                 }
             }
         }

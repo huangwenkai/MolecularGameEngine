@@ -34,6 +34,7 @@
         (name: "coal_ore", kind: Static, solid: true,  color: (74, 74, 78),    jitter: 16, hp: 10, acid_proof: true, drop: Some("stone_debris")),
         (name: "iron_ore", kind: Static, solid: true,  color: (128, 106, 92),  jitter: 16, hp: 12, acid_proof: true, drop: Some("stone_debris")),
         (name: "gold_ore", kind: Static, solid: true,  color: (150, 124, 52),  jitter: 16, hp: 14, acid_proof: true, drop: Some("stone_debris")),
+        (name: "soil",     kind: Static, solid: true,  color: (94, 64, 40),    jitter: 14, hp: 2,  drop: Some("dirt_debris")),
         (name: "platform", kind: Static, solid: false, platform: true, color: (160, 120, 70), jitter: 16, hp: 4, drop: Some("wood_debris")),
         (name: "rope",     kind: Static, solid: false, climbable: true, color: (150, 110, 60), jitter: 14, hp: 2, drop: Some("wood_debris")),
         (name: "torch",    kind: Static, solid: false, light: 224, hp: 1, color: (255, 190, 80), jitter: 0, drop: Some("wood_debris")),
