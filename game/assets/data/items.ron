@@ -420,6 +420,21 @@
             crit: 100.0,
             crit_dmg: 200.0,
         ),
+        (
+            id: "tome_poison",
+            name: "毒法术魔法书",
+            slot: Weapon,
+            stack: 1,
+            icon: Some("tome_poison"),
+            dmg: 6.0,
+            armor: 0.0,
+            speed: 1.0,
+            hp: 0.0,
+            lvl: 4,
+            value: 220,
+            crit: 0.0,
+            crit_dmg: 0.0,
+        ),
     ],
     affixes: [
         (

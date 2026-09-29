@@ -9,6 +9,8 @@ use mge_world::World;
 pub enum ProjKind {
     Arrow,
     Fireball,
+    /// 毒弹（毒法术魔法书）：命中施加中毒
+    PoisonBolt,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -44,6 +46,8 @@ impl Default for Projectiles {
 
 pub const ARROW_DMG: f32 = 14.0;
 pub const FIREBALL_DMG: f32 = 26.0;
+/// 毒弹直接伤害（主要威胁是附带的中毒）
+pub const POISON_BOLT_DMG: f32 = 12.0;
 
 impl Projectiles {
     pub fn spawn(&mut self, kind: ProjKind, pos: Vec2, vel: Vec2) {
@@ -54,6 +58,7 @@ impl Projectiles {
             life: match kind {
                 ProjKind::Arrow => 6.0,
                 ProjKind::Fireball => 4.0,
+                ProjKind::PoisonBolt => 5.0,
             },
             stuck: false,
             age: 0.0,
@@ -82,9 +87,9 @@ impl Projectiles {
                 p.pos += p.vel * sdt;
                 let (px, py) = (p.pos.x as i32, p.pos.y as i32);
                 let mat = world.pixels.get(px, py).mat;
-                // 入水：箭矢减速 / 火球化汽
+                // 入水：箭矢减速 / 火球与毒弹化开
                 if mat == water {
-                    if p.kind == ProjKind::Fireball {
+                    if matches!(p.kind, ProjKind::Fireball | ProjKind::PoisonBolt) {
                         vfx.spawn(&self.fx_fizz, p.pos, 1.0, rng);
                         return false;
                     }
@@ -98,6 +103,21 @@ impl Projectiles {
                         hitstop = hitstop.max(6);
                         return false;
                     }
+                    if p.kind == ProjKind::PoisonBolt {
+                        // 毒弹撞地：绿色溅射（施加中毒由调用方在命中检测外处理）
+                        for _ in 0..6 {
+                            vfx.dot(
+                                p.pos,
+                                Vec2::new(rng.range_f32(-40.0, 40.0), rng.range_f32(-60.0, -10.0)),
+                                0.4,
+                                1.8,
+                                [0.35, 0.9, 0.3],
+                                150.0,
+                                true,
+                            );
+                        }
+                        return false;
+                    }
                     p.stuck = true;
                     p.life = p.life.min(3.0);
                     vfx.spawn(&self.fx_arrow_hit, p.pos, 1.0, rng);
@@ -105,6 +125,17 @@ impl Projectiles {
                 }
             }
             // 尾焰/尾迹
+            if p.kind == ProjKind::PoisonBolt && !p.stuck {
+                vfx.dot(
+                    p.pos + Vec2::new(rng.range_f32(-1.0, 1.0), rng.range_f32(-1.0, 1.0)),
+                    -p.vel * 0.05,
+                    rng.range_f32(0.2, 0.4),
+                    rng.range_f32(1.5, 2.5),
+                    [0.35, 0.9, 0.3],
+                    -20.0,
+                    true,
+                );
+            }
             if p.kind == ProjKind::Fireball && !p.stuck {
                 vfx.dot(
                     p.pos + Vec2::new(rng.range_f32(-1.0, 1.0), rng.range_f32(-1.0, 1.0)),
@@ -147,12 +178,13 @@ impl Projectiles {
                     let base = match p.kind {
                         ProjKind::Arrow => ARROW_DMG,
                         ProjKind::Fireball => FIREBALL_DMG,
+                        ProjKind::PoisonBolt => POISON_BOLT_DMG,
                     };
                     let dmg = st.damage(base) * if crit { crit_mult } else { 1.0 };
                     let knock = p.vel.normalize_or_zero() * 90.0;
                     let name = match p.kind {
                         ProjKind::Arrow => self.fx_arrow_hit.as_str(),
-                        ProjKind::Fireball => self.fx_hit_spark.as_str(),
+                        ProjKind::Fireball | ProjKind::PoisonBolt => self.fx_hit_spark.as_str(),
                     };
                     vfx.spawn(name, p.pos, 1.0, rng);
                     vfx.text(p.pos + Vec2::new(0.0, -6.0), dmg as u32, crit);
@@ -186,6 +218,16 @@ pub fn render(list: &[Projectile], batch: &mut SpriteBatch, white: &Region, arro
                     1.0,
                 ]);
                 batch.push_at(p.pos, Vec2::new(1.6, 1.6), white, [1.0, 1.0, 0.85, 1.0]);
+            }
+            ProjKind::PoisonBolt => {
+                let k = (p.age * 14.0).sin().abs();
+                batch.push_at(p.pos, Vec2::new(3.2, 3.2), white, [
+                    0.3,
+                    0.7 + k * 0.2,
+                    0.2,
+                    1.0,
+                ]);
+                batch.push_at(p.pos, Vec2::new(1.6, 1.6), white, [0.8, 1.0, 0.75, 1.0]);
             }
         }
     }

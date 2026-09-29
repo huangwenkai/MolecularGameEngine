@@ -273,6 +273,25 @@ pub fn parse_key(s: &str) -> Option<KeyCode> {
 // 设置面板（ESC）
 // ---------------------------------------------------------------------------
 
+/// 实验按钮请求（ESC 面板 → 主循环消费；面板不直接操作游戏状态）
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum LabReq {
+    /// 生成毒抗怪物（史莱姆，毒抗 0.8）
+    SpawnPoisonMob,
+    /// 生成骷髅兵（毒抗 0.5 对照）
+    SpawnSkeleton,
+    /// 生成毒抗对照：魔化蘑菇（耐火 0.6）
+    SpawnMushroom,
+    /// 发一本毒法术魔法书
+    GivePoisonTome,
+    /// 发一本闪电魔法书
+    GiveLightningTome,
+    /// 发一瓶毒液瓶
+    GivePoisonVial,
+    /// 清空全部怪物
+    ClearMonsters,
+}
+
 #[derive(Default)]
 pub struct SettingsUi {
     pub open: bool,
@@ -280,6 +299,8 @@ pub struct SettingsUi {
     pub key_page: bool,
     /// 等待重绑定的动作（Some = 点击了按键按钮，等待玩家按新键）
     listen: Option<Action>,
+    /// 实验按钮请求队列（主循环逐帧消费）
+    pub lab_reqs: Vec<LabReq>,
 }
 
 impl SettingsUi {
@@ -428,6 +449,39 @@ impl SettingsUi {
                 if mag {
                     settings.save();
                 }
+                ui.add_space(6.0);
+
+                // ---- 实验（新功能测试按钮）----
+                ui.heading("实验（功能测试）");
+                ui.separator();
+                ui.horizontal(|ui| {
+                    if ui.button("🧪 生成毒抗怪物").clicked() {
+                        self.lab_reqs.push(LabReq::SpawnPoisonMob);
+                    }
+                    if ui.button("💀 生成骷髅兵(毒抗0.5)").clicked() {
+                        self.lab_reqs.push(LabReq::SpawnSkeleton);
+                    }
+                });
+                ui.horizontal(|ui| {
+                    if ui.button("🍄 生成蘑菇(耐火)").clicked() {
+                        self.lab_reqs.push(LabReq::SpawnMushroom);
+                    }
+                    if ui.button("🧹 清空怪物").clicked() {
+                        self.lab_reqs.push(LabReq::ClearMonsters);
+                    }
+                });
+                ui.horizontal(|ui| {
+                    if ui.button("📕 毒法术魔法书").clicked() {
+                        self.lab_reqs.push(LabReq::GivePoisonTome);
+                    }
+                    if ui.button("⚡ 闪电魔法书").clicked() {
+                        self.lab_reqs.push(LabReq::GiveLightningTome);
+                    }
+                });
+                if ui.button("🧴 毒液瓶(淬毒材料)").clicked() {
+                    self.lab_reqs.push(LabReq::GivePoisonVial);
+                }
+                ui.small("新功能在此配测试按钮：毒抗怪物/毒法书/毒液瓶，怪物生成在面前");
                 ui.add_space(6.0);
                     }); // columns
                 }); // ScrollArea

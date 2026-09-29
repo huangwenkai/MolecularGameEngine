@@ -392,13 +392,34 @@ impl GameApp {
         }
     }
 
-    /// 是否持有「闪电魔法书」（背包或任意装备位）
-    pub fn has_tome(&self) -> bool {
+    /// 是否持有某法器（背包或任意装备位）
+    pub fn has_item(&self, def_id: &str) -> bool {
         self.inv
             .bag
             .iter()
             .chain(self.inv.equip.iter())
-            .any(|s| s.as_ref().map(|it| it.def == "tome_lightning").unwrap_or(false))
+            .any(|s| s.as_ref().map(|it| it.def == def_id).unwrap_or(false))
+    }
+
+    /// 是否持有「闪电魔法书」
+    pub fn has_tome(&self) -> bool {
+        self.has_item("tome_lightning")
+    }
+
+    /// 毒法术魔法书自带法术：向鼠标方向发射毒弹（命中施加中毒），独立于技能系统
+    fn cast_tome_poison(&mut self) {
+        let hand = self.player.pos
+            + Vec2::new(0.0, -10.0)
+            + Vec2::new(self.player.facing * 5.0, 0.0);
+        let dir = (self.mouse_world - hand).normalize_or_zero();
+        if dir == Vec2::ZERO {
+            return;
+        }
+        self.projectiles
+            .spawn(projectiles::ProjKind::PoisonBolt, hand + dir * 6.0, dir * 200.0);
+        // 施法音效（复用 Shoot）+ 手部绿光
+        self.audio.play(audio::Sfx::Shoot);
+        self.vfx.dot(hand, Vec2::ZERO, 0.2, 2.5, [0.35, 0.9, 0.3], 0.0, true);
     }
 
     /// 闪电魔法书自带法术：从角色手上一路连接闪电到**鼠标指向的位置**，独立于技能系统
@@ -742,20 +763,35 @@ impl App for GameApp {
                 self.player.facing = d.signum();
             }
         }
-        // ---- 闪电魔法书（法器）：持有时剑模式左键 = 引雷术（独立冷却，与技能系统无关）----
+        // ---- 法器（魔法书）：持有时剑模式左键 = 施放自带法术（独立冷却，与技能系统无关）----
         self.tome_cd = (self.tome_cd - 1.0 / 60.0).max(0.0);
         self.tool.tome_cast = false;
-        if self.has_tome()
+        let tome_spell = if self.has_item("tome_lightning") {
+            Some("tome_lightning")
+        } else if self.has_item("tome_poison") {
+            Some("tome_poison")
+        } else {
+            None
+        };
+        if tome_spell.is_some()
             && matches!(self.tool.tool, Tool::Sword)
             && !busy
             && ctx.input.pressed(Action::Attack)
             && self.tome_cd <= 0.0
         {
-            self.cast_tome_lightning(ctx);
-            // 冷却随攻速：基础 1.2s ÷ 攻速倍率（攻速越快引雷越频繁）
+            // 冷却随攻速（基础冷却随法术不同）
             let st = self.inv.aggregate(&self.db);
-            self.tome_cd = (1.2 / st.atk_speed()).max(0.2);
-            self.tool.tome_cast = true; // 本次攻击改为引雷，不挥剑
+            match tome_spell {
+                Some("tome_lightning") => {
+                    self.cast_tome_lightning(ctx);
+                    self.tome_cd = (1.2 / st.atk_speed()).max(0.2);
+                }
+                _ => {
+                    self.cast_tome_poison();
+                    self.tome_cd = (2.0 / st.atk_speed()).max(0.3);
+                }
+            }
+            self.tool.tome_cast = true; // 本次攻击改为施法，不挥剑
         }
         let (swing, shake_tool) = tools::update(
             &mut self.tool,
@@ -910,6 +946,7 @@ impl App for GameApp {
             let base = match p.kind {
                 projectiles::ProjKind::Arrow => projectiles::ARROW_DMG,
                 projectiles::ProjKind::Fireball => projectiles::FIREBALL_DMG,
+                projectiles::ProjKind::PoisonBolt => projectiles::POISON_BOLT_DMG,
             };
             let dmg = st.damage(base) * if crit { crit_mult } else { 1.0 };
             if let Some(mpos) = self.monsters.proj_hit(p.pos, dmg) {
@@ -928,6 +965,12 @@ impl App for GameApp {
                 let (_, hs) = self.vfx.spawn(&fx.explosion, pos, 1.0, &mut self.rng);
                 self.hitstop = self.hitstop.max(hs);
                 ctx.camera.add_shake(8.0);
+            } else if kind == projectiles::ProjKind::PoisonBolt {
+                // 毒弹：直击目标中毒 4s，溅射 30px 范围中毒 3s
+                self.monsters.apply_status_at(pos, monsters::StatusKind::Poison, 4.0);
+                self.monsters
+                    .apply_status_area(pos, 30.0, monsters::StatusKind::Poison, 3.0);
+                let _ = self.vfx.spawn(&fx.hit_spark, pos, 1.0, &mut self.rng);
             } else {
                 let _ = self.vfx.spawn(&fx.arrow_hit, pos, 1.0, &mut self.rng);
             }
@@ -1168,6 +1211,45 @@ impl App for GameApp {
                 self.dbg.draw(&snap, egui);
                 self.settings_ui
                     .draw(&mut self.settings, &mut self.audio, ctx.input, egui);
+            }
+        }
+        // ---- ESC 面板"实验"按钮：消费请求（生成怪物/发放道具）----
+        let lab_reqs: Vec<settings::LabReq> = self.settings_ui.lab_reqs.drain(..).collect();
+        for req in lab_reqs {
+            use settings::LabReq;
+            match req {
+                LabReq::SpawnPoisonMob | LabReq::SpawnSkeleton | LabReq::SpawnMushroom => {
+                    let kind = match req {
+                        LabReq::SpawnPoisonMob => monsters::Kind::Slime,
+                        LabReq::SpawnSkeleton => monsters::Kind::SkeletonSoldier,
+                        _ => monsters::Kind::DemonMushroom,
+                    };
+                    let px = (self.player.pos.x as i32) + self.player.facing.signum() as i32 * 60;
+                    let sy = self.surface_y(px) as f32;
+                    self.monsters.test_spawn(kind, Vec2::new(px as f32, sy), &mut self.rng);
+                    self.hint = (format!("已生成 {}（面前 60px）", kind.name()), 1.5);
+                }
+                LabReq::ClearMonsters => {
+                    self.monsters.list.clear();
+                    self.hint = ("已清空全部怪物".to_string(), 1.2);
+                }
+                LabReq::GivePoisonTome | LabReq::GiveLightningTome | LabReq::GivePoisonVial => {
+                    let def = match req {
+                        LabReq::GivePoisonTome => "tome_poison",
+                        LabReq::GiveLightningTome => "tome_lightning",
+                        _ => "vial_poison",
+                    };
+                    let n = if def == "vial_poison" { 10 } else { 1 };
+                    if self.inv.add(
+                        items::Item { def: def.into(), count: n, affixes: Vec::new() },
+                        &self.db,
+                    ) {
+                        let name = self.db.def(def).name.clone();
+                        self.hint = (format!("已获得「{name}」×{n}"), 1.5);
+                    } else {
+                        self.hint = ("背包已满，添加失败".to_string(), 1.5);
+                    }
+                }
             }
         }
         // ---- 新手引导 ----
