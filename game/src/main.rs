@@ -83,6 +83,10 @@ pub struct GameApp {
     pub build_sel: mge_world::pieces::PieceKind,
     /// 农作物（耕地坐标 + 生长时间）
     pub crops: Vec<farm::Crop>,
+    /// 打开的商店（NPC 列表索引）
+    pub shop_open: Option<usize>,
+    /// 村庄声望（-100~100，事件/守村/交易影响）
+    pub village_rep: i32,
     pub audio: audio::Audio,
     /// 系统设置（音量/震动/键位，持久化于 saves/settings.ron）
     pub settings: settings::Settings,
@@ -176,6 +180,8 @@ impl GameApp {
             tome_cd: 0.0,
             build_sel: mge_world::pieces::PieceKind::Wall,
             crops: Vec::new(),
+            shop_open: None,
+            village_rep: 0,
             audio,
             settings,
             veg,
@@ -564,7 +570,7 @@ impl App for GameApp {
         }
 
         // NPC 生活 AI（地表清理后生成：NPC + 浆果丛）
-        self.npcs = npc::Npcs::new(&mut self.world, 2, &mut self.rng);
+        self.npcs = npc::Npcs::new(&mut self.world, 10, &mut self.rng);
 
         // 系统设置：键位覆盖 + 震屏倍率
         self.settings.apply(ctx.input.map_mut());
@@ -870,6 +876,49 @@ impl App for GameApp {
             if let Some(msg) = farm::use_hoe(self) {
                 self.tool.place_cooldown = 10;
                 self.hint = (msg.to_string(), 1.4);
+            }
+        }
+        // ---- NPC 交互（E）：问候 / 商店 ----
+        {
+            let near = self
+                .npcs
+                .list
+                .iter()
+                .enumerate()
+                .filter(|(_, n)| (n.pos - self.player.pos).length() < 42.0)
+                .min_by(|a, b| {
+                    (a.1.pos - self.player.pos)
+                        .length()
+                        .total_cmp(&(b.1.pos - self.player.pos).length())
+                });
+            if ctx.input.just_pressed(Action::Interact) {
+                match near {
+                    Some((i, n)) if n.prof == 3 => {
+                        self.shop_open = Some(i);
+                    }
+                    Some((i, n)) => {
+                        let prof = npc::PROFESSIONS[n.prof as usize];
+                        let att = match n.rel {
+                            r if r >= 50 => "笑容满面",
+                            r if r >= 0 => "点了点头",
+                            _ => "警惕地看着你",
+                        };
+                        let mem = n.memories.last().cloned().unwrap_or_default();
+                        self.hint = (
+                            format!(
+                                "{prof}·{} {att}（关系 {}）{}",
+                                n.name.split('·').next().unwrap_or(""),
+                                n.rel,
+                                if mem.is_empty() { String::new() } else { format!("｜记得：{mem}") }
+                            ),
+                            2.2,
+                        );
+                        let _ = i;
+                    }
+                    None => {}
+                }
+            } else if let Some((_, n)) = near {
+                self.hint = (format!("[E] 与 {} 交谈", n.name), 0.15);
             }
         }
         let (active_started, _finished) =
@@ -1285,6 +1334,96 @@ impl App for GameApp {
                 inventory::draw(self, egui);
                 skills::draw_window(self, egui);
                 skills::draw_hud(self, egui);
+                // ---- 商店窗口（靠近商人按 E 打开）----
+                let shop_npc = self.shop_open.and_then(|i| {
+                    self.npcs
+                        .list
+                        .get(i)
+                        .filter(|n| (n.pos - self.player.pos).length() <= 60.0)
+                        .map(|n| (i, n.name.clone(), n.memories.clone()))
+                });
+                if shop_npc.is_none() {
+                    self.shop_open = None;
+                }
+                if let Some((i, n_name, n_memories)) = shop_npc {
+                    let mult = (1.0 - self.village_rep as f32 * 0.005).clamp(0.5, 1.5);
+                    let price = |base: u32| ((base as f32 * mult).round() as u32).max(1);
+                    let coins = self.inv.coin_count();
+                    let has_wheat = self.inv.bag.iter().flatten().any(|it| it.def == "wheat");
+                    let rep = self.village_rep;
+                    // 闭包内只收集意图（不借用 self 可变字段），交易在 show() 后执行
+                    let mut buy: Option<(&'static str, u32)> = None;
+                    let mut sell_wheat = false;
+                    egui::Window::new(format!("商店 · {n_name}"))
+                        .default_width(300.0)
+                        .show(egui, |ui| {
+                            ui.label(format!(
+                                "你的金币 {coins} ｜ 声望 {rep}（{}）",
+                                if mult < 1.0 { "有折扣" } else { "原价" }
+                            ));
+                            ui.separator();
+                            for (name, id, base) in [
+                                ("治疗药水", "potion_hp", 30u32),
+                                ("毒液瓶", "vial_poison", 45),
+                                ("麦种", "seeds_wheat", 12),
+                            ] {
+                                let p = price(base);
+                                ui.horizontal(|ui| {
+                                    if ui
+                                        .add_enabled(
+                                            coins >= p,
+                                            egui::Button::new(format!("买 {name} {p}币")),
+                                        )
+                                        .clicked()
+                                    {
+                                        buy = Some((id, p));
+                                    }
+                                });
+                            }
+                            ui.separator();
+                            ui.horizontal(|ui| {
+                                if ui
+                                    .add_enabled(has_wheat, egui::Button::new("卖 小麦 3币"))
+                                    .clicked()
+                                {
+                                    sell_wheat = true;
+                                }
+                            });
+                            ui.small(format!(
+                                "记事：{}",
+                                n_memories
+                                    .last()
+                                    .cloned()
+                                    .unwrap_or_else(|| "（无）".to_string())
+                            ));
+                        });
+                    if let Some((id, p)) = buy {
+                        if self.inv.take_coins(p)
+                            && self.inv.add(
+                                items::Item { def: id.into(), count: 1, affixes: vec![] },
+                                &self.db,
+                            )
+                        {
+                            self.npcs.relate(i, 1, Some("与我做过买卖".into()));
+                        }
+                    }
+                    if sell_wheat {
+                        for slot in self.inv.bag.iter_mut() {
+                            let Some(it) = slot else { continue };
+                            if it.def == "wheat" {
+                                it.count -= 1;
+                                if it.count == 0 {
+                                    *slot = None;
+                                }
+                                break;
+                            }
+                        }
+                        if self.inv.give_coins(3) {
+                            self.village_rep += 1;
+                            self.npcs.relate(i, 1, Some("卖给我小麦".into()));
+                        }
+                    }
+                }
                 let snap = debug::DbgSnapshot::of(self);
                 self.dbg.draw(&snap, egui);
                 self.settings_ui

@@ -120,6 +120,7 @@ pub fn action_name(a: Action) -> &'static str {
         Action::Slot8 => "slot8",
         Action::Slot9 => "slot9",
         Action::Slot10 => "slot10",
+        Action::Interact => "interact",
         Action::ToggleDebug => "debug",
         Action::ToggleEditor => "editor",
         Action::ToggleMenu => "menu",
@@ -210,6 +211,7 @@ const REBINDABLE: &[Action] = &[
     Action::Walk,
     Action::Pickup,
     Action::SkillPanel,
+    Action::Interact,
 ];
 
 /// 动作中文名（UI 展示）
@@ -231,6 +233,7 @@ fn action_label(a: Action) -> &'static str {
         Action::Slot8 => "快捷 8 · 火球",
         Action::Slot9 => "快捷 9 · 平台",
         Action::Slot10 => "快捷 0 · 建造",
+        Action::Interact => "与 NPC 交互 / 商店",
         Action::Inventory => "背包",
         Action::Potion => "喝药水",
         Action::ToggleMenu => "系统设置",
@@ -394,6 +397,7 @@ impl SettingsUi {
                         row(ui, "闪电术", &key_of(map, Action::Skill4));
                         row(ui, "冰霜新星", &key_of(map, Action::Skill5));
                         row(ui, "毒爆", &key_of(map, Action::Skill6));
+                        row(ui, "交互/商店", &key_of(map, Action::Interact));
                         row(ui, "系统设置", &key_of(map, Action::ToggleMenu));
                         row(ui, "调试面板", &key_of(map, Action::ToggleDebug));
                         row(ui, "特效编辑器", &key_of(map, Action::ToggleEditor));

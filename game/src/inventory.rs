@@ -149,6 +149,70 @@ impl Inventory {
     }
 
     /// 使用药水（第一瓶治疗药水，回复量 = def.hp）
+    // ---- 金币（经济系统 S1-8/9）----
+    /// 持有金币数
+    pub fn coin_count(&self) -> u32 {
+        self.bag
+            .iter()
+            .flatten()
+            .filter(|it| it.def == "coin")
+            .map(|it| it.count as u32)
+            .sum()
+    }
+
+    /// 扣除金币（不足返回 false）
+    pub fn take_coins(&mut self, n: u32) -> bool {
+        if self.coin_count() < n {
+            return false;
+        }
+        let mut left = n;
+        for slot in self.bag.iter_mut() {
+            let Some(it) = slot else { continue };
+            if it.def != "coin" {
+                continue;
+            }
+            let take = (it.count as u32).min(left);
+            it.count -= take as u16;
+            left -= take;
+            if it.count == 0 {
+                *slot = None;
+            }
+            if left == 0 {
+                break;
+            }
+        }
+        true
+    }
+
+    /// 给予金币（堆叠优先，背包满返回 false）
+    pub fn give_coins(&mut self, n: u16) -> bool {
+        let mut left = n as u32;
+        for slot in self.bag.iter_mut() {
+            let Some(it) = slot else { continue };
+            if it.def == "coin" && (it.count as u32) < 999 {
+                let add = (999 - it.count as u32).min(left);
+                it.count += add as u16;
+                left -= add;
+                if left == 0 {
+                    break;
+                }
+            }
+        }
+        if left > 0 {
+            for slot in self.bag.iter_mut() {
+                if slot.is_none() {
+                    let add = 999u32.min(left);
+                    *slot = Some(Item { def: "coin".into(), count: add as u16, affixes: vec![] });
+                    left -= add;
+                    if left == 0 {
+                        break;
+                    }
+                }
+            }
+        }
+        left == 0
+    }
+
     pub fn use_potion(&mut self, hp: &mut f32, max_hp: f32, db: &ItemDb) -> bool {
         if *hp >= max_hp {
             return false;

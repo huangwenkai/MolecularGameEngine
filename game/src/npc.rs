@@ -50,7 +50,23 @@ pub struct Npc {
     pub home: Vec2,
     pub face: f32,
     pub anim: f32,
+    /// 职业（PROFESSIONS 索引）
+    pub prof: u8,
+    /// 名字
+    pub name: String,
+    /// 对玩家关系值（-100 敌视 ~ 100 信任）
+    pub rel: i8,
+    /// 记忆（重要事件，保留最近 6 条）
+    pub memories: Vec<String>,
 }
+
+/// 职业表（第一版 6 职业；索引即 prof 值）
+pub const PROFESSIONS: [&str; 6] = ["村长", "农民", "铁匠", "商人", "猎人", "守卫"];
+
+/// 自动名字池
+pub const NAMES: [&str; 10] = [
+    "老周", "阿花", "王铁", "钱掌柜", "张弓", "大壮", "小满", "李婶", "石头", "六叔",
+];
 
 pub struct Npcs {
     pub list: Vec<Npc>,
@@ -89,12 +105,11 @@ impl Npcs {
             }
         }
         for i in 0..count {
-            let sy = surface_y(world, world.spawn_x + (i as i32 - 1) * 24 - 30);
+            let spread = (i as i32 - (count as i32) / 2) * 30 - 20;
+            let sy = surface_y(world, world.spawn_x + spread);
+            let prof = (i as u8) % PROFESSIONS.len() as u8;
             list.push(Npc {
-                pos: Vec2::new(
-                    world.spawn_x as f32 + (i as f32 - 1.0) * 24.0 - 29.5,
-                    sy as f32,
-                ),
+                pos: Vec2::new(world.spawn_x as f32 + spread as f32 + 0.5, sy as f32),
                 vel: Vec2::ZERO,
                 hunger: rng.range_f32(0.0, 30.0),
                 thirst: rng.range_f32(0.0, 30.0),
@@ -102,12 +117,31 @@ impl Npcs {
                 state: NpcState::Idle,
                 state_t: 0,
                 target: home,
-                home,
+                home: Vec2::new(world.spawn_x as f32 + spread as f32 + 0.5, sy as f32),
                 face: 1.0,
                 anim: rng.range_f32(0.0, 6.0),
+                prof,
+                name: NAMES
+                    .get(i)
+                    .map(|s| format!("{s}·{}", PROFESSIONS[prof as usize]))
+                    .unwrap_or_else(|| format!("村民{i}")),
+                rel: 0,
+                memories: Vec::new(),
             });
         }
         Self { list, wander_cd: 0.0 }
+    }
+
+    /// 对玩家关系变化（-100~100 夹取）并记忆（去重，保留最近 6 条）
+    pub fn relate(&mut self, i: usize, delta: i8, memory: Option<String>) {
+        let Some(n) = self.list.get_mut(i) else { return };
+        n.rel = (n.rel as i16 + delta as i16).clamp(-100, 100) as i8;
+        if let Some(m) = memory {
+            n.memories.push(m);
+            if n.memories.len() > 6 {
+                n.memories.remove(0);
+            }
+        }
     }
 
     /// 需求随时间增长

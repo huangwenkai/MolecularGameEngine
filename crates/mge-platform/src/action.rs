@@ -20,6 +20,8 @@ pub enum Action {
     Slot8,
     Slot9,
     Slot10,
+    /// 与 NPC 交互（对话/商店）
+    Interact,
     ToggleDebug,
     ToggleEditor,
     /// 系统设置菜单（ESC）
@@ -88,6 +90,7 @@ impl ActionMap {
         put(KeyCode::Digit8, Action::Slot8);
         put(KeyCode::Digit9, Action::Slot9);
         put(KeyCode::Digit0, Action::Slot10);
+        put(KeyCode::KeyE, Action::Interact);
         put(KeyCode::F3, Action::ToggleDebug);
         put(KeyCode::F1, Action::ToggleEditor);
         put(KeyCode::Escape, Action::ToggleMenu);
